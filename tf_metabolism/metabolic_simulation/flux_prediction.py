@@ -78,8 +78,11 @@ def read_expressoin_data(omics_file, delimiter=','):
             expression_score[isoform_id] = expression_level
     return expression_score
 
-def calculate_flux(output_dir, omics_file, getpra_file, use_getpra, generic_cobra_model_file, context_specific_cobra_model_file, minimum_biomass=0.01):    
-    getrpa_sl_info = parse_getpra_information(getpra_file)
+def calculate_flux(output_dir, omics_file, getpra_file, use_getpra, generic_cobra_model_file, context_specific_cobra_model_file, minimum_biomass=0.01, biomass_reaction_id='biomass_reaction'):
+    # getpra_file is Recon2M.2-only (GeTPRA / BIGG). Human-GEM has none and passes None;
+    # it is only consulted when use_getpra=True, so tolerate its absence. Default
+    # biomass_reaction_id keeps the Recon2M.2 path byte-identical ('biomass_reaction').
+    getrpa_sl_info = parse_getpra_information(getpra_file) if getpra_file else {}
     cobra_model = read_sbml_model(generic_cobra_model_file)
     cobra_isoforms = [isoform.id for isoform in cobra_model.genes]
     print('###', cobra_model)
@@ -104,11 +107,11 @@ def calculate_flux(output_dir, omics_file, getpra_file, use_getpra, generic_cobr
     obj = LAD.LAD()
     obj.load_cobra_model(context_specific_cobra_model)
 
-    a,b,c = obj.run_FBA(new_objective='biomass_reaction')
+    a,b,c = obj.run_FBA(new_objective=biomass_reaction_id)
     print('results : ', a, b)
 
     flux_constraints = {}
-    flux_constraints['biomass_reaction'] = [minimum_biomass, 1000.0]
+    flux_constraints[biomass_reaction_id] = [minimum_biomass, 1000.0]
     
     non_boundary_reactions = set(each_reaction.id for each_reaction in context_specific_cobra_model.reactions
                                  if not each_reaction.boundary)

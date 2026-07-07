@@ -28,7 +28,7 @@ dependencies:
   - statsmodels=0.9
   - tqdm=4.64
   - joblib=1.1
-  - python-libsbml=5.17
+  - python-libsbml #=5.17
 
   # --- optimization solver (needs license) ---
   - gurobi=9.1
@@ -52,3 +52,17 @@ dependencies:
       - cobra==0.5.4
       - umap-learn==0.5.4
       - gurobipy==9.1.2
+
+# --- External base models (PART A, multi-model support) — NOT conda packages ---
+# The Human models are the SysBioChalmers/Human-GEM repo checked out at pinned
+# release tags into resources/Human-GEM@<tag>/ (gitignored; ~430 MB total):
+#     Human1 = tag v1.0.0  (commit e4feea4943d807ac9e3435c10430750b76928405)
+#     Human2 = tag v2.0.0  (commit 635f533152dc5f7290ce04d12700eaa882273c3e)
+#   git clone --branch v1.0.0 https://github.com/SysBioChalmers/Human-GEM.git resources/Human-GEM@v1.0.0
+#   git clone --branch v2.0.0 https://github.com/SysBioChalmers/Human-GEM.git resources/Human-GEM@v2.0.0
+# Recon2M.2 stays the bundled default under tf_metabolism/data/.
+#
+# --- Multi-MEM backend (PART B) — Phase 2, NOT installed here ---
+# Only tINIT runs in this env (cobra 0.5.4 / py3.6). GIMME/iMAT/FASTCORE/(t)INIT via
+# `troppo` need a SEPARATE modern-Python env (cobra>=0.24, py>=3.8); MBA/mCADRE need
+# MATLAB + COBRA Toolbox. Bridged via subprocess. See FUTURE_REQUESTS.md.

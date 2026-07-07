@@ -53,3 +53,6 @@ htmlcov/
 # Large input data (optional — uncomment to exclude; see README on data hosting)
 # ---------------------------------------------------------------------------
 # input_data/
+
+# Human-GEM base models (multi-model support) — cloned at pinned tags; large, do not commit
+resources/Human-GEM@*/

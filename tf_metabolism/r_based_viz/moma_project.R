@@ -191,6 +191,10 @@ for (moma_file in moma_files) {
       Y = umap_coords[, 2],
       distance_to_center    = d_ko,
       wt_distance_to_center = d_wt,
+      wt_x = wt_umap[1],                      # projected WT baseline coords — the SAME
+      wt_y = wt_umap[2],                      # frame as the KO dots; the sample cross must
+                                              # be drawn here (NOT umap_ref[sample], which is
+                                              # the training-fit position and disagrees).
       delta_distance        = d_ko - d_wt,    # < 0 = toward Control (per-sample)
       recovery_proj_umap    = rec_proj_umap,  # > 0 = toward Control (UMAP 2D)
       recovery_proj_pca     = rec_proj_pca,   # > 0 = toward Control (PCA, preferred)
@@ -202,6 +206,8 @@ for (moma_file in moma_files) {
       Y = umap_coords[, 2],
       distance_to_center    = d_ko,
       wt_distance_to_center = NA_real_,
+      wt_x = NA_real_,
+      wt_y = NA_real_,
       delta_distance        = NA_real_,
       recovery_proj_umap    = NA_real_,
       recovery_proj_pca     = NA_real_,

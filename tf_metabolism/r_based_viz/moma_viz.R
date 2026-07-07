@@ -140,14 +140,23 @@ for (result_file in result_files) {
     stringsAsFactors = FALSE
   )
 
+  # Sample WT position = the projected WT baseline (wt_x/wt_y from moma_project.R) that
+  # the KO dots and the recovery score are anchored to — NOT umap_ref[sample], which is
+  # the training-fit position and lands in a different frame (making the cross look
+  # inconsistent with the dots). Fall back to umap_ref only for legacy results without
+  # wt_x/wt_y.
   sample_label <- sprintf("Sample(%s)", sample_name)
-  if (sample_name %in% rownames(umap_ref)) {
+  if (all(c("wt_x", "wt_y") %in% colnames(tmp_df)) && !is.na(tmp_df$wt_x[1])) {
+    sx <- tmp_df$wt_x[1]; sy <- tmp_df$wt_y[1]
+  } else if (sample_name %in% rownames(umap_ref)) {
+    sx <- umap_ref[sample_name, "UMAP1"]; sy <- umap_ref[sample_name, "UMAP2"]
+  } else {
+    sx <- NA_real_; sy <- NA_real_
+  }
+  has_sample <- !is.na(sx)
+  if (has_sample) {
     cross_df <- rbind(cross_df, data.frame(
-      x     = umap_ref[sample_name, "UMAP1"],
-      y     = umap_ref[sample_name, "UMAP2"],
-      group = sample_label,
-      stringsAsFactors = FALSE
-    ))
+      x = sx, y = sy, group = sample_label, stringsAsFactors = FALSE))
   }
 
   # Colorblind-safe color mapping (Wong 2011)
@@ -156,16 +165,16 @@ for (result_file in result_files) {
     "Top-10 targets" = "#E69F00",   # orange — MOMA top targets
     "Control Center" = "#333333"    # dark   — center cross marker
   )
-  if (sample_name %in% rownames(umap_ref)) {
-    color_map[sample_label] <- "#D55E00"   # vermilion — sample position
+  if (has_sample) {
+    color_map[sample_label] <- "#D55E00"   # vermilion — sample WT (before-KO) position
   }
 
-  # Arrow data: sample original position → KO position for top-10 targets
+  # Arrow data: sample WT (before-KO) position → KO position for top-10 targets
   arrow_df <- NULL
-  if (sample_name %in% rownames(umap_ref)) {
+  if (has_sample) {
     arrow_df <- data.frame(
-      x      = umap_ref[sample_name, "UMAP1"],
-      y      = umap_ref[sample_name, "UMAP2"],
+      x      = sx,
+      y      = sy,
       xend   = top_df$X,
       yend   = top_df$Y,
       toward = top_df$recovery_proj_pca > 0

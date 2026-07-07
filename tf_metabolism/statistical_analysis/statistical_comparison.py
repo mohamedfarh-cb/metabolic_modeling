@@ -28,12 +28,35 @@ def _rank_biserial_corr(pop1, pop2):
         return np.nan, np.nan
 
 
+def _cohens_d(pop1, pop2):
+    """Cohen's d: pooled-SD standardized mean difference (condition2 - condition1).
+
+    d = (mean2 - mean1) / s_pooled,
+    s_pooled = sqrt(((n1-1) s1^2 + (n2-1) s2^2) / (n1 + n2 - 2))  (sample SD, ddof=1)
+    Range: unbounded; |d| ~ 0.2 small, 0.5 medium, 0.8 large. This is the
+    parametric (t-test) analogue of the rank-biserial correlation used on the
+    non-parametric branch. Returns nan if undefined (a group with n<2, or zero
+    pooled SD).
+    """
+    a = np.asarray(pop1, dtype=float)
+    b = np.asarray(pop2, dtype=float)
+    n1, n2 = len(a), len(b)
+    if n1 < 2 or n2 < 2:
+        return np.nan
+    s1, s2 = np.std(a, ddof=1), np.std(b, ddof=1)
+    s_pooled = np.sqrt(((n1 - 1) * s1 ** 2 + (n2 - 1) * s2 ** 2) / (n1 + n2 - 2))
+    if s_pooled == 0 or np.isnan(s_pooled):
+        return np.nan
+    return (np.mean(b) - np.mean(a)) / s_pooled
+
+
 def two_grouped_data_comparison(condition1_df, condition2_df,
                                 related=False,
                                 p_value_cutoff=0.05,
                                 filter_by='FDR',
                                 force_non_parametric=False,
-                                rbc_cutoff=None):
+                                rbc_cutoff=None,
+                                cohens_d_cutoff=None):
     """Compare two groups of flux/omics profiles.
 
     Parameters
@@ -55,6 +78,18 @@ def two_grouped_data_comparison(condition1_df, condition2_df,
         If set (e.g. 0.5), additionally require |rank-biserial corr| > rbc_cutoff.
         Only applied for the Wilcoxon rank-sum test (non-parametric, unrelated).
         Paper (Section 2.10) uses rbc_cutoff=0.5.
+    cohens_d_cutoff : float or None
+        If set (e.g. 0.8 = conventional "large"), additionally require
+        |Cohen's d| > cohens_d_cutoff on the parametric (t-test) branch.
+
+        Effect size is decoupled from the test choice and ALWAYS computed: the
+        non-parametric branch reports rank-biserial correlation and the
+        parametric branch reports Cohen's d (both also stored in a generic
+        'Effect size' column tagged by 'Effect size type'). The two cutoffs are
+        kept separate because the measures live on different scales
+        (rank-biserial in [-1, 1]; Cohen's d unbounded). This keeps an
+        effect-size gate active even when n>=30 switches the code to the t-test.
+        Both default to None, which preserves the original behavior exactly.
     """
     while filter_by not in ['FDR', 'Bonferroni', 'None', 'raw_p']:
         print('Input argument filter_by is not correct.')
@@ -90,12 +125,25 @@ def two_grouped_data_comparison(condition1_df, condition2_df,
             target_function = ttest_ind
 
     # --- build result columns ---
-    compute_rbc = use_wilcoxon_ranksum  # always compute for rank-sum; filter by rbc_cutoff separately
+    # Effect size is ALWAYS computed and is decoupled from the test choice: the
+    # Wilcoxon rank-sum branch reports rank-biserial correlation; the t-test
+    # branch reports Cohen's d. A generic 'Effect size' (+ 'Effect size type')
+    # column records whichever applies, so the effect-size gate is never lost
+    # when n>=30 switches the test from Wilcoxon to t-test.
+    if use_wilcoxon_ranksum:
+        compute_effect, effect_type, effect_specific_col = True, 'rank_biserial', 'Rank-biserial corr'
+    elif auto_method == 'parametric':
+        compute_effect, effect_type, effect_specific_col = True, 'cohens_d', 'Cohen d'
+    else:
+        # related (paired) non-parametric: no effect size (preserves old behavior)
+        compute_effect, effect_type, effect_specific_col = False, None, None
+
     base_cols = ['Condition1 mean', 'Condition1 std',
                  'Condition2 mean', 'Condition2 std',
                  'Method', 'P', 'log2 (condition2/condition1)', 'Status']
-    if compute_rbc:
-        base_cols.insert(base_cols.index('P') + 1, 'Rank-biserial corr')
+    if compute_effect:
+        p_pos = base_cols.index('P') + 1
+        base_cols[p_pos:p_pos] = [effect_specific_col, 'Effect size', 'Effect size type']
 
     result_df_dict = {c: [] for c in base_cols}
     result_df_index = []
@@ -109,16 +157,18 @@ def two_grouped_data_comparison(condition1_df, condition2_df,
             continue
 
         error = False
-        rbc = np.nan
+        effect_val = np.nan
         try:
             if use_wilcoxon_ranksum:
-                # Use mannwhitneyu for both p-value and rbc (same function)
+                # Use mannwhitneyu for both p-value and rank-biserial (same function)
                 res = mannwhitneyu(pop1, pop2, alternative='two-sided')
                 pvalue = res.pvalue
                 U = res.statistic
-                rbc = 1.0 - 2.0 * U / (len(pop1) * len(pop2))
+                effect_val = 1.0 - 2.0 * U / (len(pop1) * len(pop2))
             else:
                 _, pvalue = target_function(pop1, pop2)
+                if effect_type == 'cohens_d':
+                    effect_val = _cohens_d(pop1, pop2)
         except Exception:
             error = True
             pvalue = np.nan
@@ -145,8 +195,11 @@ def two_grouped_data_comparison(condition1_df, condition2_df,
 
         row = [mean1, np.std(pop1), mean2, np.std(pop2), method, pvalue, log2FC, status]
 
-        if compute_rbc:
-            row.insert(base_cols.index('Rank-biserial corr'), rbc)
+        if compute_effect:
+            # specific named column + generic 'Effect size' + 'Effect size type'
+            # are contiguous in base_cols (inserted right after 'P').
+            pos = base_cols.index(effect_specific_col)
+            row[pos:pos] = [effect_val, effect_val, effect_type]
 
         result_df_index.append(each_index)
         for col, val in zip(base_cols, row):
@@ -196,15 +249,24 @@ def two_grouped_data_comparison(condition1_df, condition2_df,
     else:
         filter_array = np.ones(len(result_df_index), dtype=bool)
 
-    # --- additional rbc filter (paper Section 2.10: |rbc| > 0.5) ---
-    if compute_rbc and rbc_cutoff is not None:
-        rbc_array = np.abs(np.array(result_df_dict['Rank-biserial corr'],
-                                    dtype=float))
-        rbc_pass = rbc_array > rbc_cutoff
-        filter_array = filter_array & rbc_pass
+    # --- additional effect-size filter (decoupled from the test choice) ---
+    # Non-parametric: |rank-biserial| > rbc_cutoff (paper Section 2.10: 0.5).
+    # Parametric:     |Cohen's d|     > cohens_d_cutoff (e.g. 0.8 = "large").
+    # The measures are on different scales, so the two cutoffs are never shared.
+    apply_effect_filter = False
+    if compute_effect:
+        if effect_type == 'rank_biserial' and rbc_cutoff is not None:
+            effect_cutoff = rbc_cutoff
+        elif effect_type == 'cohens_d' and cohens_d_cutoff is not None:
+            effect_cutoff = cohens_d_cutoff
+        else:
+            effect_cutoff = None
+        if effect_cutoff is not None:
+            eff_array = np.abs(np.array(result_df_dict['Effect size'], dtype=float))
+            filter_array = filter_array & (eff_array > effect_cutoff)
+            apply_effect_filter = True
 
-    apply_rbc_filter = compute_rbc and (rbc_cutoff is not None)
-    if filter_by != 'None' or apply_rbc_filter:
+    if filter_by != 'None' or apply_effect_filter:
         for col in result_df_columns:
             result_df_dict[col] = list(
                 np.array(result_df_dict[col])[filter_array]

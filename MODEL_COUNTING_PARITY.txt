@@ -1,0 +1,40 @@
+MODEL COUNTING PARITY — Recon2M.2 vs Human2 (read-only diagnostics; v2)
+
+== SECTION A: Human2 context CLEANUP anomaly (metabolites AND genes) ==
+Reactions are pruned by tINIT, but cobra 0.5.4 LEAVES the newly-orphaned metabolites
+and genes in the in-memory model. Two distinct gaps:
+  (i)  metabolites: cobra keeps orphan metabolites -> needs explicit removal.
+  (ii) genes: cobra keeps orphan genes in model.genes -> the in-memory count stayed at
+       the BASE 2,848 (this is what the reconstruct log reported).
+ROOT CAUSE: reconstruct_human_smoke pruned metabolites but (a) reported IN-MEMORY counts
+  and (b) never reloaded, so genes showed the unpruned 2,848.
+FIX (reuse Recon convention, Human-path only): keep the explicit orphan-metabolite loop
+  (tINIT.reconstruct_GEMs :131-133) AND reload the written model (:154-155) so cobra
+  rebuilds model.genes from surviving GPRs (with use_fbc_package=False orphan genes are
+  not even written). Report reloaded counts.
+
+  POST-FIX written models (orphans verified = 0 on both axes):
+  cohort/sample        reactions   genes(was 2848)  metabolites(was 8461)  orphan_met  orphan_gene
+  CD-ileum  C3022      9563        2184             6700                   0           0
+  UC-rectum C3022      9253        2157             6598                   0           0
+  Genes drop 2848 -> ~2160-2185 (true active); metabolites 8461 -> ~6600-6700; 0 orphans.
+
+== SECTION B: Recon2M.2 load vs canonical (Ryu 2017) — INTENTIONAL ==
+loaded tf_metabolism/data/Recon2M.2_Entrez_Gene_BIGG.xml = 5842 rxns / 3368 mets / 1663 genes
+canonical (Ryu 2017) = 7785 / 5324 / 1675.  All 5 shipped Recon2M.2 *_BIGG/*Transcript files
+share 5842/3368 (only gene namespace differs) -> not truncated. Breakdown of the 5842: with-GPR
+3940, no-GPR 1902 (33%; 632 boundary/exchange + 1270 transport/spontaneous). VERDICT: the
+pipeline uses the BIGG-namespace-mapped Recon2M.2 (its tasks/medium/metabolite lists are all
+BIGG-named); the ~25%/~37% gap vs canonical is BIGG-mapping loss, by design. Genes ~match. Not
+changed.
+
+== SECTION C: comparison table, BOTH counted IDENTICALLY (pruned, 0 orphans) ==
+  metric               Recon2M.2 (C3002)      Human2 (CD-ileum C3022)
+  base reactions       5842                   12931
+  base metabolites     3368                   8461
+  base genes           1663                   2848
+  context reactions    3555 (61%)             9563 (74%)
+  context metabolites  2070 (61%)             6700 (79%)
+  context genes        1306 (79%)             2184 (77%)
+  orphan mets / genes  0 / 0                    0 / 0
+  note: exchange/boundary reactions included in both context reaction counts (consistent).

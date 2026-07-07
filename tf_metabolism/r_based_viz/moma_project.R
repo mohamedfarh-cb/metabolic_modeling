@@ -130,6 +130,27 @@ umap_out_dir <- if (nchar(moma_subdir) > 0)
   file.path(output_viz_dir, moma_subdir) else output_viz_dir
 dir.create(umap_out_dir, showWarnings = FALSE, recursive = TRUE)
 
+# ---------------------------------------------------------------------------
+# Predict-frame reference. Project the SAME control/test baselines through UMAP
+# predict() so the whole figure (control cluster, center cross, WT cross, KO dots)
+# lives in ONE frame. The training umap() embedding (umap_ref) does NOT match
+# predict() coordinates, so it is only a fallback. Override the center + recovery
+# axis with the predict-frame ones and export the reference coords for moma_viz.R.
+# ---------------------------------------------------------------------------
+ctrl_umap_pf <- predict(umap_model, ctrl_pca)          # control samples, predict frame
+test_umap_pf <- predict(umap_model, test_pca)          # test samples,    predict frame
+center_x <- median(ctrl_umap_pf[, 1]); center_y <- median(ctrl_umap_pf[, 2])
+test_x   <- median(test_umap_pf[, 1]); test_y   <- median(test_umap_pf[, 2])
+rec_umap_vec <- c(center_x - test_x, center_y - test_y)
+rec_umap_vec <- rec_umap_vec / sqrt(sum(rec_umap_vec^2))
+ref_pf <- rbind(
+  data.frame(UMAP1 = ctrl_umap_pf[, 1], UMAP2 = ctrl_umap_pf[, 2],
+             condition = "Control", row.names = ctrl_ids),
+  data.frame(UMAP1 = test_umap_pf[, 1], UMAP2 = test_umap_pf[, 2],
+             condition = "Test",    row.names = test_ids))
+write.csv(ref_pf, file.path(umap_out_dir, sprintf("UMAP_predict_ref_%s.csv", mode)),
+          row.names = TRUE)
+
 file_pattern <- sprintf("^%s.*\\.csv$", file_prefix)
 moma_files <- list.files(moma_read_dir,
                          pattern   = file_pattern,

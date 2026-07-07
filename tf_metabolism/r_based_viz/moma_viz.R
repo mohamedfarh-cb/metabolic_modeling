@@ -85,10 +85,16 @@ theme_pub <- function(base_size = 10, base_family = "Liberation Sans") {
 }
 
 # ---------------------------------------------------------------------------
-# Load reference UMAP
+# Load reference UMAP. Prefer the PREDICT-frame reference (UMAP_predict_ref_<mode>.csv,
+# written by moma_project.R) so the control cluster + center cross live in the SAME frame
+# as the KO dots and WT cross; fall back to the training embedding (UMAP_<mode>_raw_data)
+# for legacy results.
 # ---------------------------------------------------------------------------
-ref_csv <- file.path(output_viz_dir, sprintf("UMAP_%s_raw_data.csv", mode))
-if (!file.exists(ref_csv)) {
+ref_pf_csv <- file.path(output_viz_dir, sprintf("UMAP_predict_ref_%s.csv", mode))
+ref_csv    <- file.path(output_viz_dir, sprintf("UMAP_%s_raw_data.csv", mode))
+if (file.exists(ref_pf_csv)) {
+  ref_csv <- ref_pf_csv
+} else if (!file.exists(ref_csv)) {
   stop("Reference UMAP file not found: ", ref_csv)
 }
 

@@ -103,7 +103,7 @@ python ./tf_metabolism.py -o ./output_CD \
 | `--target_switch_n`   | int   | Patient count at which `auto` adds the mixed-effects model (default `40`) |
 | `--target_nperm`      | int   | Permutation-null resamples for target ranking (default `1000`) |
 | `--target_nboot`      | int   | Bootstrap resamples for target ranking (default `1000`) |
-| `--ko_targets`        | GENE [GENE ...] | Render a cohort-level knockout figure per gene (`viz/ko_cohort_<SYMBOL>.png` + `.svg`): every condition2 patient's wild-type → knockout shift against the nonIBD control cloud. Accepts HGNC symbols or model gene IDs, space- or comma-separated. Omit to skip. Requires a completed MOMA projection step; renders from existing outputs without re-running MOMA. Display only — MOMA targets are hypothesis-only (see FUTURE_REQUESTS [P0]) (default: none) |
+| `--ko_targets`        | GENE [GENE ...] | Render a cohort-level knockout figure per gene (`viz/ko_cohort_<SYMBOL>.png` + `.svg`): every condition2 patient's wild-type → knockout shift against the nonIBD control cloud. Accepts HGNC symbols or model gene IDs (both case-insensitive), space- or comma-separated. Omit to skip. Renders from existing outputs without re-running MOMA, but requires a MOMA projection produced by the current predict-frame `moma_project.R` (`viz/UMAP_predict_ref_<mode>.csv` plus `wt_x`/`wt_y`); runs predating commit `e388856` lack it and the step fails loud rather than drawing a mixed-frame figure. Display only — MOMA targets are hypothesis-only (see FUTURE_REQUESTS [P0]) (default: none) |
 
 The `--flux_*` flags tune the differential-flux filtering in step 4
 (`Differential_fluxes.csv`). The defaults reproduce the original behavior, so

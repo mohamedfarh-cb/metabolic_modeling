@@ -572,13 +572,6 @@ def run_pipeline(model_name, mem, output_dir, omics_file1, omics_file2,
     if target_reactions_df:
         run_moma_results_umap(output_dir, output_viz_dir, target_reactions_df, mode='df', use_r=True)
         visualize_moma_umap(output_viz_dir, mode='df', use_r=True)
-        ## Per-target cohort KO view (opt-in via --ko_targets) → viz/ko_cohort_<GENE>.png
-        ## Purely additive: absent flag = no-op. Display only, see FUTURE_REQUESTS [P0].
-        if ko_targets:
-            try:
-                visualize_cohort_ko_umap(output_dir, output_viz_dir, ko_targets, mode='df')
-            except Exception as e:
-                logging.warning('Per-target cohort KO view skipped: %s', e)
     else:
         logging.warning('No DF reactions — skipping MOMA projection.')
 
@@ -630,6 +623,30 @@ def run_pipeline(model_name, mem, output_dir, omics_file1, omics_file2,
             logging.warning('No per-patient MOMA scores — skipping cohort target ranking.')
     except Exception as e:
         logging.warning('Cohort target ranking skipped: %s', e)
+
+    ## Per-target cohort KO view (opt-in via --ko_targets) → viz/ko_cohort_<GENE>.png
+    ## Purely additive: absent flag = no-op. Display only, see FUTURE_REQUESTS [P0].
+    ##
+    ## MUST run AFTER the cohort target ranking above: the figure's subtitle reports
+    ## the gene's rra_fdr / recurrence_prop from cohort_target_ranking.csv, which
+    ## rank_targets_across_cohort only writes a few lines up. Rendering earlier meant
+    ## the stats silently vanished on a fresh run, and — worse — on a re-run into an
+    ## existing folder the figure was stamped with the PREVIOUS run's ranking, which
+    ## is --flux_rbc-dependent (CLAUDE.md §4) and so need not match the coordinates
+    ## drawn. `target_reactions_df` is re-tested here because the KO view reads the
+    ## MOMA projection outputs (viz/UMAP_predict_ref_df.csv, viz/UMAP_Results_*.csv);
+    ## without DF reactions that projection never ran.
+    if ko_targets and target_reactions_df:
+        try:
+            visualize_cohort_ko_umap(output_dir, output_viz_dir, ko_targets, mode='df')
+        except Exception as e:
+            # logging.error, not warning: _resolve_gene_targets fails loud by design
+            # (a typo'd gene name must not pass silently). The try/except stays — this
+            # is a display-only step running after hours of Gurobi compute, so it must
+            # not abort the run — but the requested targets are echoed so the failure
+            # is greppable in the log.
+            logging.error('Per-target cohort KO view FAILED for --ko_targets %s: %s',
+                          ko_targets, e)
 
     if human:
         vpath = write_downstream_verify(output_dir, verify_stages)

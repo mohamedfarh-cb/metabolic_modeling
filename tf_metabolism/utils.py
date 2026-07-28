@@ -71,6 +71,13 @@ def _resolve_gene_targets(targets, gene_map_file):
     returns ``[(model_id, symbol), ...]`` in input order. A symbol mapping to
     several model IDs yields one tuple per match.
 
+    Matching is CASE-INSENSITIVE for both namespaces: an exact model-ID hit wins,
+    then a case-insensitive model-ID hit, then a case-insensitive symbol hit. (It
+    used to be case-sensitive on IDs and case-insensitive on symbols, so
+    'ensg00000067225' fell through to the symbol branch and died with a useless
+    "did you mean" list.) The canonical ID from gene_map.csv is always what gets
+    returned, so the R renderer still sees exactly the ID the CSVs are keyed on.
+
     NOTE: gene_map.csv's first column is named 'entrez' for historical reasons
     but holds ENSG IDs in Human-GEM runs — it is simply the model's gene ID.
 
@@ -89,8 +96,10 @@ def _resolve_gene_targets(targets, gene_map_file):
     syms = gm[sym_col].tolist()
 
     id_to_sym = dict(zip(ids, syms))
+    upper_to_id = {}
     sym_to_ids = {}
     for gid, sym in zip(ids, syms):
+        upper_to_id.setdefault(gid.upper(), gid)   # first spelling wins
         if sym:
             sym_to_ids.setdefault(sym.upper(), []).append(gid)
 
@@ -101,6 +110,10 @@ def _resolve_gene_targets(targets, gene_map_file):
             continue
         if name in id_to_sym:
             resolved.append((name, id_to_sym[name] or name))
+            continue
+        gid = upper_to_id.get(name.upper())
+        if gid is not None:
+            resolved.append((gid, id_to_sym.get(gid) or gid))
             continue
         hits = sym_to_ids.get(name.upper())
         if hits:
@@ -218,9 +231,9 @@ def argument_parser(version=None):
     parser.add_argument('--ko_targets', nargs='+', default=None,
                         help="Gene(s) to render a cohort-level knockout figure for, "
                              "one or more (space- or comma-separated). Accepts HGNC "
-                             "symbols or model gene IDs. Each produces "
-                             "viz/ko_cohort_<SYMBOL>.png showing every patient's "
-                             "WT->KO shift vs the control cloud. Omit to skip. "
+                             "symbols or model gene IDs (both case-insensitive). Each "
+                             "produces viz/ko_cohort_<SYMBOL>.png AND .svg showing every "
+                             "patient's WT->KO shift vs the control cloud. Omit to skip. "
                              "Display only: MOMA targets are hypothesis-only.")
     parser.add_argument('--model', nargs='+', default=['Recon2M.2'],
                         help="Base GEM(s), one or more (space- or comma-separated). "
@@ -919,11 +932,28 @@ def visualize_cohort_ko_umap(output_dir, output_viz_dir, targets, mode='df'):
     if os.path.exists(gene_map):
         cmd += ['--gene-map', gene_map]
 
+    # A target absent from EVERY patient model is a warn-and-skip in R (spec:
+    # "Target absent from all patients -> warn and skip"), so R exits 0 having
+    # written nothing. Snapshot the output files so the log cannot claim success
+    # for a run that produced no figure.
+    png_glob = os.path.join(output_viz_dir, 'ko_cohort_*.png')
+    before = {f: os.path.getmtime(f) for f in glob.glob(png_glob)}
+
     logging.info('[R] Running: %s', ' '.join(cmd))
     result = subprocess.run(cmd)
     if result.returncode != 0:
         raise RuntimeError('moma_cohort_viz.R exited with code %d' % result.returncode)
-    logging.info('[R] MOMA cohort target visualization done.')
+
+    written = sorted(os.path.basename(f) for f in glob.glob(png_glob)
+                     if f not in before or os.path.getmtime(f) > before[f])
+    if written:
+        logging.info('[R] MOMA cohort target visualization wrote %d figure(s): %s',
+                     len(written), ', '.join(written))
+    else:
+        logging.warning('[R] MOMA cohort target visualization wrote NO figures — all '
+                        '%d requested target(s) were absent from every patient model: %s',
+                        len(resolved),
+                        ', '.join('%s (%s)' % (s, g) for g, s in resolved))
 
 
 def _l2_score_from_moma(output_dir, sample_name, gene_index):

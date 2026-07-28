@@ -13,8 +13,17 @@ plan: `docs/superpowers/plans/2026-07-29-per-target-moma-cohort-view.md`.
 
 - **No re-simulation.** `moma_project.R` already projects EVERY gene for EVERY patient;
   the new step re-slices `viz/UMAP_Results_*.csv` by gene instead of by patient. So it
-  renders for the four completed IBDMDB runs with no Gurobi re-run, and `moma_project.R`
-  (and the [P0b] fix in it) is untouched.
+  renders with no Gurobi re-run for any completed run whose MOMA projection came from the
+  current **predict-frame** `moma_project.R` — in practice the **two Human2 runs**
+  (`output_{CD_ileum,UC_rectum}_Human2_tINIT_Human2_tINIT`). `moma_project.R` (and the
+  [P0b] fix in it) is untouched.
+- **NOT the two Recon2M.2 runs.** `output_CD_ileum_rbc_0.3` / `output_UC_rectum_rbc_0.3`
+  predate commit `e388856` and have neither `viz/UMAP_predict_ref_df.csv` nor `wt_x`/`wt_y`
+  columns, so the step **fails loud** on them (verified: `Predict-frame reference not
+  found`, exit 1) — correct behaviour, not a bug. `moma_viz.R` carries a legacy-frame
+  fallback for those older results; `moma_cohort_viz.R` deliberately does not, since the
+  entire figure is a WT→KO displacement and there is no correct legacy frame for it.
+  Rendering there requires re-running the MOMA projection step.
 - **Opt-in.** Flag absent = complete no-op; existing runs behave identically.
 - **R/ggplot2 only** — deliberately no matplotlib fallback, to avoid recreating the
   dual-backend silent divergence documented as [P2].

@@ -79,21 +79,48 @@ symbols or model gene IDs (resolved in Python via `viz/gene_map.csv`, so the sam
 command works for Recon2M.2/Entrez and Human2/ENSG runs); an unresolvable name fails
 loud. Renderer: `r_based_viz/moma_cohort_viz.R` (R/ggplot2 only, no matplotlib
 fallback — deliberately avoids the dual-backend divergence of FUTURE_REQUESTS [P2]).
-Wrapper: `utils.visualize_cohort_ko_umap`. Called from `run_pipeline` inside the
-existing `if target_reactions_df:` block; **absent flag = complete no-op**.
+Wrapper: `utils.visualize_cohort_ko_umap`. Called from `run_pipeline` **after**
+`visualize_target_oncoprint` (guarded `if ko_targets and target_reactions_df:`);
+**absent flag = complete no-op**. The position is load-bearing: the subtitle reports
+`rra_fdr`/`recurrence_prop` from `cohort_target_ranking.csv`, which
+`rank_targets_across_cohort` writes in that same block — rendering earlier dropped the
+stats on a fresh run and, on a re-run into an existing folder, stamped the figure with
+the PREVIOUS run's (`--flux_rbc`-dependent, §4) ranking.
 Re-slices the per-patient `UMAP_Results_*.csv` by gene — nothing is re-projected,
-`moma_project.R` is untouched, and NO MOMA/Gurobi re-run is needed, so it renders
-for already-completed runs. Arrow colour (toward/away) uses `recovery_proj_umap`,
+`moma_project.R` is untouched, and NO MOMA/Gurobi re-run is needed, so it renders for
+an already-completed run **provided that run's MOMA projection came from the current
+predict-frame `moma_project.R`**: true for the two **Human2** runs, NOT for the two
+Recon2M.2 runs (`output_*_rbc_0.3`), which predate `e388856`, lack
+`viz/UMAP_predict_ref_df.csv` + `wt_x`/`wt_y`, and therefore fail loud (verified).
+`moma_viz.R` has a legacy-frame fallback for those older results; this script
+deliberately does not. Arrow colour (toward/away) uses `recovery_proj_umap`,
 NOT `recovery_proj_pca`: the figure draws the UMAP frame, so colouring by an unseen
 quantity would contradict the visible arrows. `recovery_proj_pca` remains the
-scoring quantity everywhere else. Gene coverage varies per patient (tINIT builds a
-context model each), so patients lacking the gene are dropped and counted in the
-subtitle. DISPLAY ONLY — carries the [P0] hypothesis-only caveat.
+scoring quantity everywhere else. Arrow direction is a **named legend entry**
+("Arrow: KO toward control" / "…away from control"), not a bare colour — and
+"Patient KO" was recoloured `#E69F00`→`#0072B2` so no point colour sits next to an
+arrow colour. Gene coverage varies per patient (tINIT builds a context model each),
+so patients lacking the gene are dropped and counted in the subtitle. DISPLAY ONLY —
+carries the [P0] hypothesis-only caveat.
 
 ### NOT yet implemented (see FUTURE_REQUESTS.md)
-- `--target_method`, `--target_switch_n` flags (size-adaptive method control).
-- Option B: effect size on BOTH test branches (Cohen's d for parametric).
-- Investigation of why the mixed-effects model never runs.
+- **[P0] The competitive null for MOMA targets.** The score is now a correct signed
+  projection onto the unit Test→Control PCA axis (the ~1e11 disruption-magnitude bug IS
+  fixed, and the old absolute gates are gone), but it is still NOT restandardized against
+  a **magnitude-matched random-KO background**. Verified 2026-07-29: every top-10 recovery
+  gene sits at the 95th-98th percentile of ‖KO−WT‖, and all CD scores are positive (global
+  drift). **So `cohort_target_ranking` output is hypothesis-only — never describe a gene as
+  a validated target.** See FUTURE_REQUESTS [P0] + WORKLOG 2026-07-29.
+- **[P2] The Python (non-R) MOMA projection path** omits `recovery_proj_pca` and silently
+  falls back to the discredited L2 displacement score. Always run the MOMA projection with
+  the R backend (`use_r=True`), as all four IBDMDB runs did.
+
+### Resolved (previously listed here as open)
+- `--target_method`, `--target_switch_n` (+ `--target_nperm`/`--target_nboot`) — implemented.
+- Option B: effect size on BOTH test branches (Cohen's d for parametric) — implemented.
+- Why the mixed-effects model never runs — explained: `switch_n`=40 > n, and
+  G≈1362 genes > `mixedlm_max_genes`=300, so it is skipped by design and falls back to RRA.
+  Both cohorts are therefore scored by the same backbone.
 
 ---
 

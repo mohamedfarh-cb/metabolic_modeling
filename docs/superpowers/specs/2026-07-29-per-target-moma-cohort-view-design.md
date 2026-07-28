@@ -34,7 +34,16 @@ Re-slicing those files by gene is sufficient. Consequences:
 
 - `moma_project.R` is **not modified** — the `[P0b]` fix stays untouched.
 - No Gurobi, no MOMA re-run, no re-projection.
-- The step works on the **four already-completed IBDMDB runs** with no re-run.
+- The step works with no re-run on any already-completed run **whose MOMA
+  projection was produced by the current predict-frame `moma_project.R`** — i.e.
+  the two Human2 runs (`output_CD_ileum_Human2_tINIT_Human2_tINIT`,
+  `output_UC_rectum_Human2_tINIT_Human2_tINIT`). The two Recon2M.2 runs
+  (`output_CD_ileum_rbc_0.3`, `output_UC_rectum_rbc_0.3`) predate commit
+  `e388856`: they have neither `viz/UMAP_predict_ref_df.csv` nor `wt_x`/`wt_y`
+  columns, so the step **fails loud** there, as designed. Unlike `moma_viz.R`,
+  which carries a legacy-frame fallback for those older results, this script
+  deliberately has none — there is no correct frame to fall back to when the
+  whole figure is a WT→KO displacement.
 - Coordinates are by construction identical to the per-patient figures.
 
 ## Approach (chosen)
@@ -164,7 +173,9 @@ the CD-ileum Human2 run: 2,041 genes common to all 36 patients, 2,285 in the uni
 
 ## Verification
 
-The four completed runs are the test fixture — verification needs no re-run.
+The two completed **Human2** runs are the test fixture — verification needs no
+re-run. (The two Recon2M.2 runs cannot serve as fixtures: they lack the
+predict-frame reference, so the step correctly fails loud on them.)
 
 1. `PKM` on CD-ileum Human2 (present in 36/36): 36 arrows, 36 WT dots, 36 KO dots.
 2. WT dot coordinates match `wt_x`/`wt_y` in the per-patient CSVs, confirming the

@@ -79,12 +79,44 @@ theme_pub <- function(base_size = 10, base_family = "Liberation Sans") {
     )
 }
 
+# ---------------------------------------------------------------------------
+# Legend / colour key.
+#
+# Arrow COLOUR is the direction encoding (toward vs away from the control
+# cloud), so it must be a LABELLED legend entry — not a bare `color=` argument
+# outside aes(). Both arrow levels therefore go through the same colour scale
+# as the points, and `override.aes` below gives each key the right glyph:
+# points draw as points (linetype 0), arrows draw as lines (shape NA). Without
+# that split every key would show a dot AND a line and the encoding would stay
+# unreadable.
+#
+# "Patient KO" was #E69F00 (orange), which sat next to the #D55E00 (vermillion)
+# toward-control arrow and invited the reader to map orange-line -> KO. It is
+# now #0072B2 (blue, Wong) so no point colour is adjacent to an arrow colour.
+# Arrow colours themselves are unchanged. "Control" #009E73 is unchanged.
+# ---------------------------------------------------------------------------
+LVL_CTRL   <- "Control"
+LVL_CENTER <- "Control Center"
+LVL_WT     <- "Patient WT"
+LVL_KO     <- "Patient KO"
+LVL_TOWARD <- "Arrow: KO toward control"
+LVL_AWAY   <- "Arrow: KO away from control"
+
 COLOR_MAP <- c(
-  "Control"        = "#009E73",   # bluish green (Wong) — matches moma_viz.R
-  "Patient WT"     = "#666666",
-  "Patient KO"     = "#E69F00",
-  "Control Center" = "#333333"
+  "#009E73",   # Control        — bluish green (Wong), matches moma_viz.R
+  "#333333",   # Control Center
+  "#666666",   # Patient WT     — open dot
+  "#0072B2",   # Patient KO     — filled dot (was #E69F00; collided with arrows)
+  "#D55E00",   # toward-control arrow (unchanged)
+  "grey70"     # away-from-control arrow (unchanged)
 )
+names(COLOR_MAP) <- c(LVL_CTRL, LVL_CENTER, LVL_WT, LVL_KO, LVL_TOWARD, LVL_AWAY)
+
+# Per-level key glyph: shape NA + linetype 1 => a LINE key (arrows);
+#                      shape n  + linetype 0 => a POINT key (dots/cross).
+KEY_SHAPE    <- c(16, 3, 1, 16, NA, NA)
+KEY_LINETYPE <- c(0,  0, 0, 0,  1,  1)
+names(KEY_SHAPE) <- names(KEY_LINETYPE) <- names(COLOR_MAP)
 
 # ---------------------------------------------------------------------------
 # Reference cloud (fail loud — the frame is undefined without it)
@@ -126,10 +158,27 @@ if (!is.null(gene_map_file) && file.exists(gene_map_file)) {
   id2sym <- setNames(gm[[2]], gm[[1]])
 }
 
-rank_df <- NULL
+# A legacy/partial cohort_target_ranking.csv (no rra_fdr / recurrence_prop, or no
+# Gene column at all) must NOT abort the run: sprintf() on a NULL column errors and
+# would kill every remaining target in the same invocation. Validate up front and
+# fall back to "no stats in the subtitle", which the spec already allows for a
+# missing file.
+RANK_COLS <- c("Gene", "rra_fdr", "recurrence_prop")
+rank_df   <- NULL
 rank_file <- file.path(output_dir, "cohort_target_ranking.csv")
 if (file.exists(rank_file)) {
-  rank_df <- read.csv(rank_file, colClasses = c(Gene = "character"))
+  rank_df <- tryCatch(read.csv(rank_file, colClasses = c(Gene = "character")),
+                      error = function(e) {
+                        warning(sprintf("Could not read %s (%s) — subtitle stats omitted.",
+                                        rank_file, conditionMessage(e)), immediate. = TRUE)
+                        NULL
+                      })
+  if (!is.null(rank_df) && !all(RANK_COLS %in% names(rank_df))) {
+    warning(sprintf("%s lacks column(s) %s — subtitle stats omitted.", rank_file,
+                    paste(setdiff(RANK_COLS, names(rank_df)), collapse = ", ")),
+            immediate. = TRUE)
+    rank_df <- NULL
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -187,43 +236,66 @@ for (gene_id in targets) {
   stat_txt <- ""
   if (!is.null(rank_df) && gene_id %in% rank_df$Gene) {
     rr <- rank_df[rank_df$Gene == gene_id, ][1, ]
-    stat_txt <- sprintf("  |  rra_fdr = %.3g, recurrence = %.2f",
+    stat_txt <- sprintf(" | rra_fdr = %.3g, recurrence = %.2f",
                         rr$rra_fdr, rr$recurrence_prop)
   }
   miss_txt <- if (n_missing > 0)
-    sprintf("  |  %d patient(s) dropped (gene not in their model)", n_missing) else ""
+    sprintf(" | %d patient(s) dropped (gene not in their model)", n_missing) else ""
 
-  subtitle <- sprintf(
-    "%d/%d patients moved toward control (UMAP recovery axis)%s%s\nDisplay only — MOMA targets are hypothesis-only (FUTURE_REQUESTS [P0]); significance is never read off a 2D embedding.",
-    n_toward, n_shown, stat_txt, miss_txt)
+  # The stats line has no fixed width: symbol length + %.3g values as long as
+  # "1.08e-110" + a two-digit dropped count. With plot.title.position = "plot"
+  # the subtitle is centred on the FULL device width, so an over-long line clips
+  # at BOTH ends (observed: ST6GALNAC3 lost its leading "28/35" and trailing ")").
+  # Wrap it. SUBTITLE_WRAP is set below the fixed [P0] caveat line's own length
+  # (123 chars, which renders intact at 7.2in / size 8), so both always fit.
+  SUBTITLE_WRAP <- 100
+  line1 <- sprintf("%d/%d patients moved toward control (UMAP recovery axis)%s%s",
+                   n_toward, n_shown, stat_txt, miss_txt)
+  line1 <- paste(strwrap(line1, width = SUBTITLE_WRAP), collapse = "\n")
 
-  cross_df <- data.frame(x = center_x, y = center_y, group = "Control Center")
+  subtitle <- paste0(
+    line1,
+    "\nDisplay only — MOMA targets are hypothesis-only (FUTURE_REQUESTS [P0]); significance is never read off a 2D embedding.")
+
+  cross_df <- data.frame(x = center_x, y = center_y, group = LVL_CENTER)
+
+  # Arrow direction is mapped THROUGH aes() so it becomes a named legend entry.
+  arrow_df$direction <- ifelse(arrow_df$toward, LVL_TOWARD, LVL_AWAY)
+
+  # Only the levels actually drawn get a key (a cohort can be 100% toward), so
+  # the override.aes vectors are subset by name to stay length-matched.
+  shown_levels <- names(COLOR_MAP)[names(COLOR_MAP) %in%
+                                   c(LVL_CTRL, LVL_CENTER, LVL_WT, LVL_KO,
+                                     unique(arrow_df$direction))]
 
   p <- ggplot() +
     stat_ellipse(data = ctrl_df,
-                 aes(x = UMAP1, y = UMAP2, color = "Control", fill = "Control"),
+                 aes(x = UMAP1, y = UMAP2, color = LVL_CTRL, fill = LVL_CTRL),
                  type = "norm", level = 0.80, linetype = "dashed", linewidth = 0.3,
                  geom = "polygon", alpha = 0.06, show.legend = FALSE) +
     geom_point(data = ctrl_df,
-               aes(x = UMAP1, y = UMAP2, color = "Control"),
+               aes(x = UMAP1, y = UMAP2, color = LVL_CTRL),
                alpha = 0.7, size = 2.4, shape = 16) +
     geom_segment(data = arrow_df[!arrow_df$toward, , drop = FALSE],
-                 aes(x = wt_x, y = wt_y, xend = ko_x, yend = ko_y),
-                 color = "grey70", alpha = 0.55, linewidth = 0.35,
-                 arrow = arrow(length = unit(0.12, "cm"), type = "open"),
-                 show.legend = FALSE) +
+                 aes(x = wt_x, y = wt_y, xend = ko_x, yend = ko_y, color = direction),
+                 alpha = 0.55, linewidth = 0.35,
+                 arrow = arrow(length = unit(0.12, "cm"), type = "open")) +
     geom_segment(data = arrow_df[arrow_df$toward, , drop = FALSE],
-                 aes(x = wt_x, y = wt_y, xend = ko_x, yend = ko_y),
-                 color = "#D55E00", alpha = 0.65, linewidth = 0.35,
-                 arrow = arrow(length = unit(0.12, "cm"), type = "open"),
-                 show.legend = FALSE) +
-    geom_point(data = arrow_df, aes(x = wt_x, y = wt_y, color = "Patient WT"),
+                 aes(x = wt_x, y = wt_y, xend = ko_x, yend = ko_y, color = direction),
+                 alpha = 0.65, linewidth = 0.35,
+                 arrow = arrow(length = unit(0.12, "cm"), type = "open")) +
+    geom_point(data = arrow_df, aes(x = wt_x, y = wt_y, color = LVL_WT),
                size = 2.0, shape = 1, stroke = 0.9) +
-    geom_point(data = arrow_df, aes(x = ko_x, y = ko_y, color = "Patient KO"),
+    geom_point(data = arrow_df, aes(x = ko_x, y = ko_y, color = LVL_KO),
                size = 2.2, shape = 16, alpha = 0.9) +
     geom_point(data = cross_df, aes(x = x, y = y, color = group),
                shape = 3, size = 3.5, stroke = 0.9) +
-    scale_color_manual(values = COLOR_MAP, name = NULL) +
+    scale_color_manual(
+      values = COLOR_MAP, name = NULL, breaks = shown_levels,
+      guide  = guide_legend(
+        override.aes = list(shape    = unname(KEY_SHAPE[shown_levels]),
+                            linetype = unname(KEY_LINETYPE[shown_levels]),
+                            size     = 2.6, linewidth = 0.9, alpha = 1))) +
     scale_fill_manual(values = COLOR_MAP, guide = "none") +
     labs(x = "UMAP 1", y = "UMAP 2",
          title = bquote("Cohort response to " * italic(.(symbol)) * " knockout"),

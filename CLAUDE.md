@@ -71,6 +71,25 @@ Outputs `cohort_target_ranking.csv` and `viz/moma_gene_scores_full.csv`.
 The MOMA recovery score is normalized per patient inside the ranking step
 (fixed a bug where raw scores were ~1e9–1e11 and saturated the statistics).
 
+### 3i. Per-target MOMA cohort view (implemented, CORE pipeline step, opt-in)
+`--ko_targets GENE[,GENE...]` renders `viz/ko_cohort_<SYMBOL>.png` (+ .svg) per gene:
+every condition2 patient's WT→KO shift as an arrow over the nonIBD control cloud —
+the INVERSE of the per-patient `UMAP_MOMA_target_results_<id>.png`. Accepts HGNC
+symbols or model gene IDs (resolved in Python via `viz/gene_map.csv`, so the same
+command works for Recon2M.2/Entrez and Human2/ENSG runs); an unresolvable name fails
+loud. Renderer: `r_based_viz/moma_cohort_viz.R` (R/ggplot2 only, no matplotlib
+fallback — deliberately avoids the dual-backend divergence of FUTURE_REQUESTS [P2]).
+Wrapper: `utils.visualize_cohort_ko_umap`. Called from `run_pipeline` inside the
+existing `if target_reactions_df:` block; **absent flag = complete no-op**.
+Re-slices the per-patient `UMAP_Results_*.csv` by gene — nothing is re-projected,
+`moma_project.R` is untouched, and NO MOMA/Gurobi re-run is needed, so it renders
+for already-completed runs. Arrow colour (toward/away) uses `recovery_proj_umap`,
+NOT `recovery_proj_pca`: the figure draws the UMAP frame, so colouring by an unseen
+quantity would contradict the visible arrows. `recovery_proj_pca` remains the
+scoring quantity everywhere else. Gene coverage varies per patient (tINIT builds a
+context model each), so patients lacking the gene are dropped and counted in the
+subtitle. DISPLAY ONLY — carries the [P0] hypothesis-only caveat.
+
 ### NOT yet implemented (see FUTURE_REQUESTS.md)
 - `--target_method`, `--target_switch_n` flags (size-adaptive method control).
 - Option B: effect size on BOTH test branches (Cohen's d for parametric).
@@ -165,3 +184,5 @@ before deleting; `rm` in a terminal is permanent (no Trash).
 - `README.md` — upstream usage and output descriptions.
 - `WORKLOG.md` — session-by-session progress and findings.
 - `FUTURE_REQUESTS.md` — known issues and planned improvements.
+- `tf_metabolism/r_based_viz/moma_cohort_viz.R` — per-target cohort KO figure (§3i);
+  core pipeline step, opt-in via `--ko_targets`, renders from existing run outputs.

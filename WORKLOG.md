@@ -4,6 +4,30 @@ Session-by-session log of changes, runs, and findings. Newest at top.
 
 ---
 
+## Session: 2026-07-29b (per-target MOMA cohort view — new core pipeline step)
+
+Added `--ko_targets`: one figure per knocked-out gene showing every condition2
+patient's WT→KO shift against the control cloud, inverting the per-patient MOMA view.
+Design spec: `docs/superpowers/specs/2026-07-29-per-target-moma-cohort-view-design.md`;
+plan: `docs/superpowers/plans/2026-07-29-per-target-moma-cohort-view.md`.
+
+- **No re-simulation.** `moma_project.R` already projects EVERY gene for EVERY patient;
+  the new step re-slices `viz/UMAP_Results_*.csv` by gene instead of by patient. So it
+  renders for the four completed IBDMDB runs with no Gurobi re-run, and `moma_project.R`
+  (and the [P0b] fix in it) is untouched.
+- **Opt-in.** Flag absent = complete no-op; existing runs behave identically.
+- **R/ggplot2 only** — deliberately no matplotlib fallback, to avoid recreating the
+  dual-backend silent divergence documented as [P2].
+- **Arrow toward/away uses `recovery_proj_umap`, not `recovery_proj_pca`** — the figure
+  draws the UMAP frame, so colouring by the PCA score would produce arrows visibly
+  pointing toward control while labelled "away". Display-local; scoring unchanged.
+- **Gene coverage varies per patient** (tINIT context models): CD-ileum Human2 has 2,041
+  genes common to all 36 patients but 2,285 in the union. Patients lacking the target are
+  dropped and the count is reported in the subtitle.
+- Display only; subtitle carries the [P0] hypothesis-only caveat.
+
+---
+
 ## Session: 2026-06-24e (display fix — KO plots must fit_transform, not transform)
 
 ### Root cause of the KO-plot collapse (it is NOT UMAP vs PCA)

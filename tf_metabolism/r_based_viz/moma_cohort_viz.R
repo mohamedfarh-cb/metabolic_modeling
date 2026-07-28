@@ -229,7 +229,14 @@ for (gene_id in targets) {
          title = bquote("Cohort response to " * italic(.(symbol)) * " knockout"),
          subtitle = subtitle) +
     theme_pub() +
-    theme(aspect.ratio = 1)
+    theme(aspect.ratio = 1,
+          # Anchor title/subtitle to the FULL plot width (device), not just the
+          # panel: with a legend on the right, "panel"-anchored centering (the
+          # ggplot2 default) leaves too little room for the wide [P0] caveat
+          # line and clips its left edge off-canvas. "plot" anchoring gives the
+          # subtitle the full device width to center in, so the fixed caveat
+          # sentence renders fully on-canvas without being shortened.
+          plot.title.position = "plot")
 
   safe <- gsub("[^A-Za-z0-9_.-]", "_", symbol)
   out_png <- file.path(output_viz_dir, sprintf("ko_cohort_%s.png", safe))

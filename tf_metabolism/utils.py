@@ -62,6 +62,57 @@ def _effective_gene_map(output_viz_dir=None):
     return os.path.join(os.path.dirname(__file__), 'data', 'metabolic_genes.csv')
 
 
+def _resolve_gene_targets(targets, gene_map_file):
+    """Resolve user-supplied gene names to model gene IDs.
+
+    Accepts either an HGNC symbol ('PKM') or a model gene ID
+    ('ENSG00000067225' for Human-GEM runs, an Entrez ID for Recon2M.2 runs) and
+    returns ``[(model_id, symbol), ...]`` in input order. A symbol mapping to
+    several model IDs yields one tuple per match.
+
+    NOTE: gene_map.csv's first column is named 'entrez' for historical reasons
+    but holds ENSG IDs in Human-GEM runs — it is simply the model's gene ID.
+
+    Raises ValueError naming the offending input (with near-miss candidates)
+    when a name resolves to nothing, so a typo fails loud instead of silently
+    producing no figure.
+    """
+    if not os.path.exists(gene_map_file):
+        logging.warning('No gene map at %s — treating targets as model gene IDs.',
+                        gene_map_file)
+        return [(str(t), str(t)) for t in targets]
+
+    gm = pd.read_csv(gene_map_file, dtype=str).fillna('')
+    id_col, sym_col = gm.columns[0], gm.columns[1]
+    ids = gm[id_col].tolist()
+    syms = gm[sym_col].tolist()
+
+    id_to_sym = dict(zip(ids, syms))
+    sym_to_ids = {}
+    for gid, sym in zip(ids, syms):
+        if sym:
+            sym_to_ids.setdefault(sym.upper(), []).append(gid)
+
+    resolved = []
+    for raw in targets:
+        name = str(raw).strip()
+        if not name:
+            continue
+        if name in id_to_sym:
+            resolved.append((name, id_to_sym[name] or name))
+            continue
+        hits = sym_to_ids.get(name.upper())
+        if hits:
+            for gid in hits:
+                resolved.append((gid, id_to_sym.get(gid) or name))
+            continue
+        near = [s for s in sym_to_ids if s.startswith(name.upper()[:3])][:10]
+        raise ValueError(
+            "Gene target '%s' not found in %s. Did you mean: %s"
+            % (name, gene_map_file, ', '.join(sorted(near)) or '(no close matches)'))
+    return resolved
+
+
 def run_pathway_enrichment_plot(output_dir, output_viz_dir,
                                 fdr_cutoff=0.1, title=None, r_script=None):
     """Visualize pathway enrichment results via pathway_enrichment_plot.R.

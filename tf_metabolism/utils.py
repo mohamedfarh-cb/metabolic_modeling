@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import shutil
+import subprocess
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -862,6 +863,56 @@ def visualize_moma_umap(output_viz_dir, mode='df', use_r=False):
     pd.DataFrame(target_rows, columns=['Gene', 'Symbol', 'Sample']).to_csv(
         os.path.join(output_viz_dir, 'target_genes.csv'), index=False)
     return
+
+
+def visualize_cohort_ko_umap(output_dir, output_viz_dir, targets, mode='df'):
+    """Render one cohort-level figure per knocked-out target gene.
+
+    Inverts the per-patient MOMA view: for each gene in ``targets``, draws every
+    condition2 patient's wild-type -> knockout shift against the nonIBD control
+    cloud, re-slicing the per-patient ``UMAP_Results_*.csv`` files written by
+    moma_project.R. Nothing is re-projected and no MOMA simulation is re-run, so
+    the figure shares the predict frame with the per-patient figures.
+
+    Parameters
+    ----------
+    output_dir     : run folder (read for cohort_target_ranking.csv, if present)
+    output_viz_dir : viz folder holding the projection results; figures land here
+    targets        : list of HGNC symbols and/or model gene IDs
+    mode           : UMAP reference mode (default 'df')
+
+    Writes ``{output_viz_dir}/ko_cohort_<SYMBOL>.png`` (+ .svg) per target.
+    Raises ValueError on an unresolvable gene name and RuntimeError if the R
+    renderer exits non-zero. Display only — see FUTURE_REQUESTS [P0].
+    """
+    if not targets:
+        return
+
+    gene_map = _effective_gene_map(output_viz_dir)
+    resolved = _resolve_gene_targets(targets, gene_map)
+    if not resolved:
+        logging.warning('No usable KO targets after resolution — skipping.')
+        return
+
+    gene_ids = [gid for gid, _ in resolved]
+    logging.info('[MOMA-Cohort] Rendering %d target(s): %s',
+                 len(resolved), ', '.join('%s (%s)' % (s, g) for g, s in resolved))
+
+    cmd = [
+        _find_rscript(), _r_script('moma_cohort_viz.R'),
+        '--output-dir',     output_dir,
+        '--output-viz-dir', output_viz_dir,
+        '--mode',           mode,
+        '--targets',        ','.join(gene_ids),
+    ]
+    if os.path.exists(gene_map):
+        cmd += ['--gene-map', gene_map]
+
+    logging.info('[R] Running: %s', ' '.join(cmd))
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        raise RuntimeError('moma_cohort_viz.R exited with code %d' % result.returncode)
+    logging.info('[R] MOMA cohort target visualization done.')
 
 
 def _l2_score_from_moma(output_dir, sample_name, gene_index):

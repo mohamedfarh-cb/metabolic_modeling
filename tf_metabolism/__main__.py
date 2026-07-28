@@ -27,7 +27,8 @@ from tf_metabolism.utils import (run_r_umap, run_moma_results_umap,
                                   export_moma_gene_scores_full,
                                   annotate_de_flux_membership,
                                   visualize_target_oncoprint,
-                                  visualize_pathway_flux_heatmap)
+                                  visualize_pathway_flux_heatmap,
+                                  visualize_cohort_ko_umap)
 
 from tf_metabolism.statistical_analysis import statistical_comparison
 from tf_metabolism.statistical_analysis import enrichment
@@ -242,7 +243,8 @@ def main():
                 options.flux_pval, options.flux_filter, options.flux_rbc,
                 options.target_fdr, options.target_effect_min, options.target_topk,
                 options.target_method, options.target_switch_n,
-                options.target_nperm, options.target_nboot, start)
+                options.target_nperm, options.target_nboot,
+                options.ko_targets, start)
         if single:
             run_pipeline(*args)                      # default path: propagate exactly as before
         else:
@@ -353,7 +355,7 @@ def reconstruct_human(cfg, generic_model_file, omics_file, out_dir, cap=None):
 def run_pipeline(model_name, mem, output_dir, omics_file1, omics_file2,
                  flux_pval, flux_filter, flux_rbc, target_fdr, target_effect_min,
                  target_topk, target_method, target_switch_n, target_nperm,
-                 target_nboot, start):
+                 target_nboot, ko_targets, start):
     logging.info('================ model=%s  mem=%s  ->  %s ================',
                  model_name, mem, output_dir)
     cfg = model_config.get_model_config(model_name)
@@ -570,6 +572,13 @@ def run_pipeline(model_name, mem, output_dir, omics_file1, omics_file2,
     if target_reactions_df:
         run_moma_results_umap(output_dir, output_viz_dir, target_reactions_df, mode='df', use_r=True)
         visualize_moma_umap(output_viz_dir, mode='df', use_r=True)
+        ## Per-target cohort KO view (opt-in via --ko_targets) → viz/ko_cohort_<GENE>.png
+        ## Purely additive: absent flag = no-op. Display only, see FUTURE_REQUESTS [P0].
+        if ko_targets:
+            try:
+                visualize_cohort_ko_umap(output_dir, output_viz_dir, ko_targets, mode='df')
+            except Exception as e:
+                logging.warning('Per-target cohort KO view skipped: %s', e)
     else:
         logging.warning('No DF reactions — skipping MOMA projection.')
 

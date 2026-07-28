@@ -215,6 +215,13 @@ def argument_parser(version=None):
                         help="Cohort target-ranking permutation-null resamples")
     parser.add_argument('--target_nboot', type=int, default=1000,
                         help="Cohort target-ranking bootstrap resamples")
+    parser.add_argument('--ko_targets', nargs='+', default=None,
+                        help="Gene(s) to render a cohort-level knockout figure for, "
+                             "one or more (space- or comma-separated). Accepts HGNC "
+                             "symbols or model gene IDs. Each produces "
+                             "viz/ko_cohort_<SYMBOL>.png showing every patient's "
+                             "WT->KO shift vs the control cloud. Omit to skip. "
+                             "Display only: MOMA targets are hypothesis-only.")
     parser.add_argument('--model', nargs='+', default=['Recon2M.2'],
                         help="Base GEM(s), one or more (space- or comma-separated). "
                              "Choices: Recon2M.2, Human1 (Human-GEM v1.0.0), Human2 "
@@ -887,6 +894,10 @@ def visualize_cohort_ko_umap(output_dir, output_viz_dir, targets, mode='df'):
     """
     if not targets:
         return
+    flat = []
+    for t in targets:
+        flat.extend([x for x in str(t).split(',') if x.strip()])
+    targets = flat
 
     gene_map = _effective_gene_map(output_viz_dir)
     resolved = _resolve_gene_targets(targets, gene_map)

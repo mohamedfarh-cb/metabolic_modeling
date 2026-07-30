@@ -27,17 +27,28 @@ shared by all genes in that patient, so all displacements start from the same or
     dev_g   = || d_g - D ||                                -> departure from typical
     par_g   = d_g . D_hat                                  -> movement along the drift
 
-`dev_g` is the quantity of interest: the median is what a knockout does by default, so
-||d_g - D|| is what THIS knockout does beyond that. Reporting its percentile among all
-genes in the SAME patient makes it a competitive, per-patient statistic — the calibration
-[P0] says the pipeline's score lacks.
+Panel A reports ||D|| and the share of a gene's shift lying along it — i.e. how much of
+the visible arrow is cohort default rather than the gene.
 
-A gene whose shift is purely drift lands near the 50th percentile of dev: it moved a lot,
-identically to everything else. A gene doing something specific lands high.
+WHAT GEOMETRY CANNOT DO (measured, not assumed)
+-----------------------------------------------
+The first version of panel B scored genes by ||d_g - D||, the departure from the drift,
+as a per-patient percentile. Tested over all ~2,200 genes it carries essentially NO
+information about whether the knockout helps:
 
-NOTE this measures SPECIFICITY, not benefit. A gene can depart strongly from the drift in
-a useless or harmful direction. Read it together with recovery_proj_umap (signed movement
-toward control), which is also reported. Neither is a significance test; [P0] stays open.
+    Spearman(departure-from-drift, mTS excess) = +0.006 (CD, p=0.78) / +0.159 (UC)
+    top-5% vs bottom-5% genes by mTS excess:  4.5 (CD) / 0.1 (UC) percentile points apart
+
+UC's ACOX1 (mTS 99.95th pctile) and CPT2 (7.9th) sat on top of each other at 90.9 vs 86.3.
+Even the SIGNED recovery_proj_umap manages only +0.087 / +0.203.
+
+The reason is structural: mTS is per-reaction and direction-aware in flux space, while the
+UMAP is a 2D nonlinear embedding carrying no per-reaction sign. So panel B now reads the
+flux-space quantity directly — the rMTA TS ranked against all genes in the SAME patient.
+Departure-from-drift is retained in the CSV as a specificity measure, but it is NOT a
+discriminator and is labelled as such wherever it is printed.
+
+Neither panel is a significance test; [P0] stays open and mTS is median-only (no bTS/wTS).
 
 Nothing is re-simulated. Reads the stored per-patient UMAP MOMA projections, so it needs
 a run whose projection came from the current predict-frame moma_project.R (the two Human2
@@ -70,6 +81,45 @@ DEFAULT_GENES = ['SLC7A2', 'ENO1']
 GENE_COLORS = ['#0072B2', '#D55E00', '#009E73', '#CC79A7']
 DRIFT_COLOR = '#333333'
 CLOUD_COLOR = '#CCCCCC'
+
+
+def load_ts_percentiles(viz_dir, gene_ids):
+    """Per-patient rMTA TS percentile of each gene among ALL genes in that same patient.
+
+    THIS is the discriminating quantity, and it is deliberately NOT geometric. An earlier
+    version of panel B scored genes by how far their UMAP displacement departed from the
+    cohort drift; tested over all ~2,200 genes that turned out to carry essentially no
+    information about mTS -- Spearman +0.006 (CD) / +0.159 (UC), and the top-5% and
+    bottom-5% genes by mTS excess were separated by 4.5 and 0.1 percentile points
+    respectively. UC's ACOX1 (mTS 99.95th pctile) and CPT2 (7.9th) landed on top of each
+    other at 90.9 vs 86.3.
+
+    The reason is structural: mTS is per-reaction and direction-aware in flux space, while
+    the UMAP is a 2D nonlinear embedding carrying no per-reaction sign. No geometric
+    summary of the embedding can recover it -- even the signed recovery_proj_umap manages
+    only +0.087 / +0.203. So the panel has to read the flux-space quantity directly.
+    """
+    path = os.path.join(viz_dir, 'prototype_rmta_TS_matrix.csv')
+    if not os.path.exists(path):
+        raise SystemExit(
+            'FATAL no per-patient TS matrix: %s\n'
+            '      Generate it first:  python prototype_rmta_ts.py %s\n'
+            '      (~10 min; re-reads the stored MOMA matrices.)'
+            % (path, os.path.dirname(viz_dir.rstrip('/'))))
+
+    TS = pd.read_csv(path, index_col=0)
+    # Rank within each patient (column): "does this KO beat a typical KO in THIS patient".
+    pct = TS.rank(axis=0, pct=True) * 100.0
+    rows = []
+    for gid, label in gene_ids:
+        if gid not in TS.index:
+            continue
+        for sample in TS.columns:
+            t, p = TS.loc[gid, sample], pct.loc[gid, sample]
+            if np.isfinite(t) and np.isfinite(p):
+                rows.append(dict(sample=str(sample), gene=label,
+                                 ts=float(t), ts_pctile=float(p)))
+    return pd.DataFrame(rows)
 
 
 def gene_slug(labels):
@@ -220,13 +270,16 @@ def render(cohort, viz_dir, res, raw, gene_ids):
     for s in ('top', 'right'):
         axA.spines[s].set_visible(False)
 
-    # ---- Panel B -------------------------------------------------------------
+    # ---- Panel B: does the KO beat a typical KO at moving THIS patient toward control? --
     labels = [lab for _, lab in gene_ids if lab in set(res['gene'])]
     axB.axhline(50, color='#888888', lw=1.0, ls='--', zorder=1)
     axB.text(0.985, 51, 'a typical knockout', transform=axB.get_yaxis_transform(),
              ha='right', va='bottom', fontsize=7.5, color='#666666')
+    have_ts = 'ts_pctile' in res.columns and res['ts_pctile'].notna().any()
     for i, lab in enumerate(labels):
-        v = res[res['gene'] == lab]['dev_pctile'].values
+        v = res[res['gene'] == lab]['ts_pctile'].dropna().values
+        if not len(v):
+            continue
         x = np.full(len(v), i, dtype=float) + np.linspace(-0.16, 0.16, len(v))
         axB.scatter(x, v, s=26, color=GENE_COLORS[i % len(GENE_COLORS)],
                     edgecolor='white', linewidths=0.5, zorder=3)
@@ -237,9 +290,13 @@ def render(cohort, viz_dir, res, raw, gene_ids):
     axB.set_xticks(range(len(labels)))
     axB.set_xticklabels(labels)
     axB.set_ylim(0, 105)
-    axB.set_ylabel('percentile of departure from the cohort drift\n'
+    axB.set_ylabel('rMTA transformation-score percentile\n'
                    '(among all genes, within each patient)')
-    axB.set_title('B — is the shift specific? one point = one patient', fontsize=11)
+    axB.set_title('B — does the KO beat a typical KO? one point = one patient',
+                  fontsize=11)
+    if not have_ts:
+        axB.text(0.5, 0.5, 'no per-patient TS matrix', transform=axB.transAxes,
+                 ha='center', va='center', color='#999999')
     for s in ('top', 'right'):
         axB.spines[s].set_visible(False)
 
@@ -248,12 +305,16 @@ def render(cohort, viz_dir, res, raw, gene_ids):
     fig.suptitle('PROTOTYPE — KO shift decomposition: %s  (%s)'
                  % (' vs '.join(labels), cohort.replace('_', '-')),
                  fontsize=13, fontweight='medium')
-    cap = ('Every gene KO in a patient starts from the same WT point. The cohort drift is the '
+    cap = ('A: every gene KO in a patient starts from the same WT point; the cohort drift is the '
            'MEDIAN displacement over all genes — what a knockout does by default.\n'
-           'Panel B scores each gene by how far it departs from that median, as a percentile '
-           'against all genes in the same patient. ~50 = indistinguishable from a typical KO.\n'
-           'Specificity, NOT benefit: departing from the drift can be in any direction. '
-           'Display only — [P0] competitive null still open, hypothesis-only.')
+           'B: the rMTA transformation score (per-reaction, direction-aware), ranked against all '
+           'genes in the SAME patient. ~50 = no better than a typical KO.\n'
+           'The two panels answer different questions on purpose: A is how much of the visible '
+           'movement is cohort-wide drift, B is whether the movement helps.\n'
+           'Geometry alone cannot answer B — departure-from-drift correlates with mTS at only '
+           '+0.006 (CD) / +0.159 (UC), so it was replaced by this panel.\n'
+           'Display only — [P0] competitive null still open, hypothesis-only. mTS is median-only, '
+           'no bTS/wTS.')
     fig.text(0.01, -0.02, cap, fontsize=7.5, color='#666666', va='top', ha='left')
 
     base = os.path.join(viz_dir, 'PROTO_ko_shift_decomposition_%s_%s'
@@ -286,6 +347,9 @@ def main():
     if res.empty:
         raise SystemExit('FATAL none of the requested genes appear in any patient model.')
 
+    ts = load_ts_percentiles(viz_dir, gene_ids)
+    res = res.merge(ts, on=['sample', 'gene'], how='left')
+
     drift = pd.Series({s: r['drift_norm'] for s, r in raw.items()})
     print('=== %s  (%d patients)' % (cohort, len(raw)))
     print('    cohort drift ||D||        : median %.3f  (range %.3f-%.3f) UMAP units'
@@ -301,12 +365,18 @@ def main():
               % (g['shift_norm'].median(), drift.median()))
         print('        share along the drift  : median %.0f%%'
               % (100 * g['drift_share'].median()))
-        print('        departure from drift   : median %.3f'
-              % g['dev'].median())
-        print('        ^ percentile vs all genes, within patient : median %.1f'
-              % g['dev_pctile'].median())
-        print('        moved TOWARD control   : %d/%d patients (proj pctile median %.1f)'
-              % (int(g['toward'].sum()), len(g), g['proj_pctile'].median()))
+        print('        moved TOWARD control   : %d/%d patients'
+              % (int(g['toward'].sum()), len(g)))
+        # The discriminator. Geometry (dev_pctile below) does NOT track this -- see
+        # load_ts_percentiles.
+        tsv = g['ts_pctile'].dropna()
+        if len(tsv):
+            print('    ->  rMTA TS percentile within patient : median %.1f  (%d/%d patients '
+                  'above 50)' % (tsv.median(), int((tsv > 50).sum()), len(tsv)))
+        else:
+            print('    ->  rMTA TS percentile within patient : unavailable')
+        print('        [geometry, non-discriminating] departure from drift %.3f, pctile %.1f'
+              % (g['dev'].median(), g['dev_pctile'].median()))
         print()
 
     png = render(cohort, viz_dir, res, raw, gene_ids)

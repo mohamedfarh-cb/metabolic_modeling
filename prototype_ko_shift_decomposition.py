@@ -72,6 +72,21 @@ DRIFT_COLOR = '#333333'
 CLOUD_COLOR = '#CCCCCC'
 
 
+def gene_slug(labels):
+    """Filename fragment naming the plotted genes.
+
+    Every output is named after the genes it actually contains. Without this, the CD and
+    UC figures differ only by a cohort suffix while plotting entirely different genes —
+    which is exactly how a UC (ACOX1/CPT2) figure gets mistaken for the CD (SLC7A2/ENO1)
+    one. Capped so a long --genes list cannot produce an unwieldy path.
+    """
+    if not labels:
+        return 'none'
+    if len(labels) > 3:
+        return '%s_and%dmore' % (labels[0], len(labels) - 1)
+    return '_'.join(labels)
+
+
 def resolve_genes(viz_dir, names):
     """Map HGNC symbols (or raw model ids) to model gene ids. Fails loud on a miss."""
     gm_path = os.path.join(viz_dir, 'gene_map.csv')
@@ -228,8 +243,11 @@ def render(cohort, viz_dir, res, raw, gene_ids):
     for s in ('top', 'right'):
         axB.spines[s].set_visible(False)
 
-    fig.suptitle('PROTOTYPE — KO shift decomposition: drift vs gene-specific (%s)'
-                 % cohort.replace('_', '-'), fontsize=13, fontweight='medium')
+    # The genes MUST be in the title: two cohorts' figures are otherwise identical apart
+    # from a directory, and the gene names appear only in a legend entry and a tick label.
+    fig.suptitle('PROTOTYPE — KO shift decomposition: %s  (%s)'
+                 % (' vs '.join(labels), cohort.replace('_', '-')),
+                 fontsize=13, fontweight='medium')
     cap = ('Every gene KO in a patient starts from the same WT point. The cohort drift is the '
            'MEDIAN displacement over all genes — what a knockout does by default.\n'
            'Panel B scores each gene by how far it departs from that median, as a percentile '
@@ -238,7 +256,8 @@ def render(cohort, viz_dir, res, raw, gene_ids):
            'Display only — [P0] competitive null still open, hypothesis-only.')
     fig.text(0.01, -0.02, cap, fontsize=7.5, color='#666666', va='top', ha='left')
 
-    base = os.path.join(viz_dir, 'PROTO_ko_shift_decomposition_%s' % cohort)
+    base = os.path.join(viz_dir, 'PROTO_ko_shift_decomposition_%s_%s'
+                                 % (cohort, gene_slug(labels)))
     fig.savefig(base + '.png', format='png', dpi=300, bbox_inches='tight', facecolor='white')
     fig.savefig(base + '.svg', format='svg', bbox_inches='tight', facecolor='white')
     plt.close(fig)
@@ -292,7 +311,9 @@ def main():
 
     png = render(cohort, viz_dir, res, raw, gene_ids)
     print('    wrote %s' % png)
-    out_csv = args.out_csv or 'PROTO_ko_shift_decomposition_%s.csv' % cohort
+    present = [lab for _, lab in gene_ids if lab in set(res['gene'])]
+    out_csv = args.out_csv or ('PROTO_ko_shift_decomposition_%s_%s.csv'
+                               % (cohort, gene_slug(present)))
     res.to_csv(out_csv, index=False)
     print('    wrote %s  (%d rows)' % (out_csv, len(res)))
 

@@ -100,8 +100,57 @@ default and unchanged. Remaining:
 ---
 
 ## [P0] MOMA target score must measure RECOVERY, not disruption magnitude
-**Problem (validity blocker).** The cohort target ranking scores genes by
-`recovery_proj_pca` on a raw ~1e11 scale, which is dominated by the MAGNITUDE of
+### STATUS 2026-07-29: PARTIALLY RESOLVED — stages 1-2 done, the FINAL FIX (competitive null) is NOT implemented
+Verified by re-reading the code and recomputing from the existing Human2 runs
+(see WORKLOG 2026-07-29). **Done:**
+- `recovery_proj_pca` is now a signed projection onto the **unit** Test→Control
+  centroid axis in PCA space (`r_based_viz/moma_project.R:119-120`, applied :208).
+  Scale is sane: CD 4.81..23.8, UC −32.2..20.5 — not ~1e11.
+- The condemned absolute gates (`frac_closer>0.5`, `proj_vs_distance_agree`,
+  mean-recovery ranking) are GONE. `significant` = `rra_fdr < cutoff AND
+  recurrence_prop >= effect_min` only.
+- Two partial drift controls exist: `_robust_scale_per_patient` centers each
+  patient on its MEDIAN knockout ("recovers more than the typical KO"), and RRA
+  runs on within-patient RANKS — inherently competitive against that patient's
+  all-gene background, and invariant to the common positive offset.
+- The old failing shortlist (DBT/BCKDHA/BCKDHB/HADHA/B/ECHS1/ACADM) no longer
+  appears; Human2 CD targets are glycolysis/pyrimidine/transport, UC an oxidase +
+  FAO arm, with 85-100% of patients moved toward control.
+
+**NOT done — the FINAL FIX below still stands.** The background is ALL genes, not
+a **magnitude-matched** random-KO set, so "recovers a lot because it is a large
+perturbation" is still not separated from "recovers more than an equally large
+random perturbation". Fresh evidence (2026-07-29, patient C3002, n=2173 genes):
+global drift is real (ALL 2285 genes × 36 CD patients project positive, min
++4.81); cohort-wide Spearman(‖KO−WT‖, recovery) is only **0.112** — so recovery is
+NOT merely magnitude — **but every one of the top-10 recovery genes sits at the
+95th-98th percentile of perturbation magnitude** (PKM/PKLR 97.3, ENO1/2/3 98.1).
+Also still open: the prototype's honest conclusion (0/1362 CD genes pass a
+drift-controlled null) has NEVER been re-tested against the CURRENT scoring.
+**Until the competitive null runs, the Human2 target lists remain
+hypothesis-only — do not report them as validated targets.**
+
+**EVIDENCE 2026-07-29c/30 — the drift is real, confirmed on a published metric.**
+`prototype_rmta_ts.py` implements rMTA's Transformation Score (Valcárcel 2019 Eq. 8;
+bounded [−1,+1], normalized by total change, so magnitude cannot win) on the existing MOMA
+output. Result: **CD background median mTS +0.2563 with 2284/2285 genes (100%) positive;
+UC −0.0327 with 55/2258 (2%) positive.** So the drift is a property of the CD run, not of
+any gene, and CD's raw scores (~18× UC's) are uninterpretable without their background —
+UC's excess over background is ~3× CD's. Independent corroboration: the top of the filtered
+UC list is UC's own oncoprint oxidase arm (ACOX1 +0.090, ACOX3 +0.089, NOS2 +0.087,
+DAO/PAOX +0.085), recovered by a metric that never saw the RRA ranking.
+
+**Terminology correction:** "global drift" is THIS REPO's wording, not a literature term.
+The published concern is rMTA's *under-determination* (top MTA knockouts move as readily in
+the undesired direction), and the field's fix is a **worst-case control (wTS)** — not the
+magnitude-matched random-KO background this item prescribes (that is the CMap-tau
+approach). Both are defensible; cite whichever you implement. The prototype covers only
+rMTA's **mTS**; bTS/wTS need new MTA MILP runs per gene per patient and are NOT derivable
+from stored MOMA output. **[P0] therefore remains OPEN.**
+
+**Original problem (historical — the ~1e11 score is fixed; kept for context).**
+The cohort target ranking scored genes by
+`recovery_proj_pca` on a raw ~1e11 scale, which was dominated by the MAGNITUDE of
 the flux perturbation, not by whether the knockout moves CD patients toward the
 nonIBD control state. Consequence: the CD "top targets" (DBT, BCKDHA, BCKDHB,
 HADHA/B, ECHS1, ACADM) are essential/high-flux genes whose KO causes a big
@@ -152,14 +201,64 @@ official `significant` rule; expect empty CD target set.
 **Superseded intermediate attempts (kept for history — do NOT reuse as the test):**
 - raw `recovery_proj_pca` magnitude score (rewarded disruption, not recovery);
 - normalized directional projection alone (better, but still absolute → drift-
-  confounded);
+  confounded) — **NOTE: this is what the pipeline CURRENTLY implements** (plus
+  per-patient median-centering and rank-based RRA, which remove the drift OFFSET
+  but not the magnitude confound). It is stage 2 of 3, not the final test;
 - `frac_closer>0.5` / `proj_vs_distance_agree` majority gate (knife-edge, unsound
   at n=36);
 - mean-recovery ranking (single-patient-outlier driven).
 All produced apparent targets (BCAA/FAO; then DHFR/FASN/folate) that DO NOT survive
 the competitive null. These shortlists are artifacts — do not carry forward.
 
+## [P0c] The desired direction is a COHORT average applied to every patient — ~35% of each patient's reactions are on the wrong side of it
+### FOUND 2026-07-31 by `prototype_control_distance.py`. Affects BOTH competing scores; not fixed.
+
+`Differential_fluxes.csv Status` is a population-level statement ("up in disease **on
+average**"). Every downstream score applies that single per-reaction direction to every
+patient: the pipeline's `recovery_proj_pca`, and the rMTA mTS prototype alike. Measured
+across all DE reactions x all patients:
+
+| | patient on the DISEASE side (cohort direction applies) | patient already on the CONTROL side (cohort direction is WRONG for them) |
+|---|---|---|
+| CD-ileum (244 rxn x 36 pt) | 61.8% | **37.7%** |
+| UC-rectum (771 rxn x 20 pt) | 62.0% | **33.8%** |
+
+Per-patient the disease-side share ranges 47.5-75.8% (CD) and 45.4-71.1% (UC) — for the
+worst CD patient the cohort direction is wrong for **52.5%** of their reactions.
+
+**Consequence, measured.** Absolute distance to control (direction-free,
+`sum |v_i - c_i| / gap_i`) **increases for every knockout in every patient** — CD median
++174.9%, UC +74.2% for a typical KO. Decomposing the 344 reactions that end further away
+for a median-perturbation gene (UC C3003): **58% because the patient was already on the
+control side**, 42% wrong-way movement or overshoot (59 reactions crossed past control).
+
+So mTS can be positive for 100% of CD genes while the patient's actual distance to control
+grows. Those are not contradictory — one measures agreement with a cohort-average
+direction, the other measures where the patient ended up. **Neither the pipeline score nor
+mTS can detect this, because both assume the cohort direction.**
+
+**What to do (unresolved).** Options: (a) per-patient desired directions (each patient's
+own deviation from the control mean) — patient-specific but noisier and no longer tied to
+the DE test; (b) keep cohort directions but weight each reaction by how consistently
+patients sit on the disease side; (c) report absolute distance alongside any directional
+score so the disagreement is visible rather than assumed away. Do NOT quietly pick one —
+each changes what "toward control" means.
+
+Not a defect of the distance metric: verified no units mismatch (median |WT| 38.2 vs |KO|
+26.9; perturbation 0.5x the WT-to-control gap; 0/2148 genes leave flux unchanged, which is
+expected — ROOM notes MOMA redistributes ALL fluxes on any knockout).
+
 ## [P0b] KO plots collapse — fit_transform on baselines+KOs (display only, not significance)
+### STATUS 2026-07-29: RESOLVED on the R path (the one all four runs used); Python fallback still unfixed — see the new [P2] below
+Commit `e388856` ("MOMA plots: project reference set through predict() for one
+consistent frame") put KO points, the WT cross and the reference baselines in ONE
+frame: `moma_project.R:198-203` projects the WT through the SAME `predict()`
+pipeline as the KOs (delta = 0), and `wt_x`/`wt_y` are written per sample so the
+cross is drawn at the projected position rather than the training-fit position.
+The displacement vector is therefore self-consistent. All four IBDMDB runs used
+the R backend (their `UMAP_Results_*.csv` carry `recovery_proj_pca`), so the
+delivered figures are fine. Original problem below, for context.
+
 **Problem.** Both KO-plotting functions place knockout points with
 `reducer.transform()` into a baseline-ONLY UMAP (`run_moma_results_umap` L536, per-
 patient; `plot_gene_ko_shift` L1254, ko_shift). Knockout fluxes are out-of-
@@ -195,6 +294,53 @@ referenced here. Reference implementation snippet (the gate logic) for restorati
 `significant_legacy = rra_fdr<fdr_cutoff & recurrence_prop>=effect_min & frac_closer>0.5
 & proj_vs_distance_agree`. These remain SUPERSEDED for significance (see [P0]) — kept
 only as a fallback if the display fix fails, never as the primary target test.
+
+## [P1] Adopt the calibrated KO figure into the pipeline (prototype exists and works)
+`prototype_ko_cohort_calibrated.R` + `prototype_rmta_ts.py` (both repo root, standalone,
+uncommitted) demonstrate the fix for the §3i figure's biggest interpretation hazard: the
+"k/n moved toward control" count reads as evidence when it is baseline behaviour. Verified
+on all 9 ELOVL-set genes × 2 cohorts (WORKLOG 2026-07-30).
+
+**Adopt, with these three changes — do not port the prototype verbatim:**
+1. **Keep** the cohort-background clause in the subtitle (`[cohort background: 79% of ALL
+   genes move toward control]`). Single highest-value addition.
+2. **Keep** the inset histogram of the all-gene mTS distribution with the gene marked. It
+   makes the competitive-null argument in one glance and needs no prose.
+3. **DROP the percentile** (`beats 97% of genes`). It does NOT separate the cohorts —
+   CD 95-97% vs UC 98-99% — so a reader quoting it concludes CD is nearly as good. The
+   separation lives in the excess over background, not the rank.
+4. **Cut the subtitle to 2 lines.** The prototype's is 5 and dominates the panel.
+
+**Blocker on full adoption:** the mTS values come from `prototype_rmta_ts.py`, which reads
+the full stored MOMA matrices (~5.8 GB across both cohorts, ~10 min per cohort). Wiring the
+figure to require that file means either (a) running the mTS step inside `run_pipeline`
+after MOMA, or (b) keeping the figure's mTS panel optional and rendering it only when
+`viz/prototype_rmta_mTS.csv` exists. (b) is cheaper and keeps the flag opt-in.
+
+Also fold in: a **min-patient filter is REQUIRED** in the mTS table (genes present in 1-2
+patients' models otherwise top the ranking — CD DCT/GNMT/SARDH, UC ADSS2/TNRC6B/SLC17A7).
+All reported numbers use >=50% of patients.
+
+## [P2] Python MOMA-projection fallback never got the [P0]/[P0b] fixes — silent regression risk
+`utils.run_moma_results_umap` (the non-`use_r` branch, `utils.py:642-657`) writes
+only `X`, `Y`, `distance_to_center` — **no `recovery_proj_pca`, no WT reference
+projected through the same frame**, and it still uses `reducer.transform()` into
+the baseline-only model (the [P0b] artifact). `export_moma_gene_scores_full`
+(`utils.py:885-892`) then falls back to `_l2_score_from_moma` — the raw
+displacement magnitude, i.e. exactly the disruption-not-recovery score [P0]
+exists to eliminate — and does so with only a `logging.warning`, so a run would
+silently produce a ranking built on the discredited metric.
+
+No delivered result is affected: all four IBDMDB runs used the R backend
+(verified — their `UMAP_Results_*.csv` carry `recovery_proj_pca`). This is a
+latent trap for any future R-less run.
+
+**Fix options:** (a) port the recovery-axis computation (unit Test→Control PCA
+vector + WT-through-the-same-transform) into the Python path so both backends
+agree; or (b) if the R path is the only supported one, make the fallback FAIL
+LOUD instead of silently degrading to the L2 score. (b) is cheap and matches the
+repo's fail-loud convention elsewhere; (a) is correct if the Python path is meant
+to be a real backend.
 
 ## [P1] Add `--target_method` / `--target_switch_n` flags — DONE (verify)
 Implemented in the 2026-06-24 session (auto/rra/mixedlm + switch_n/nperm/nboot).
@@ -233,16 +379,104 @@ Output filenames are fixed, so a new cutoff overwrites prior results. Workaround
 separate `output_*_rbc_*` folders pre-seeded with the expensive inputs. Optional
 `--tag` flag would let cutoffs coexist (needs threading through the R figure scripts).
 
+## [P2] Cross-model compartment comparison must normalize to background (not raw %)
+The Recon2M.2-vs-Human2 compartment figure
+(`analysis_compartment_recon_vs_human2/`) currently compares the RAW organelle %
+of DE-flux genes / targets. Raw % is NOT comparable across models, because each
+model has a different whole-model compartment background and a different gene
+inventory:
+- Whole-model mitochondrial background: Recon2M.2 ≈19% vs Human2 ≈12%. Human2 is
+  ~2× larger, but the genes it adds over Recon are disproportionately
+  cytosolic/nuclear/other, so every downstream mito fraction starts from a lower
+  floor. This alone flips the naive reading: UC DE-flux is 35% mito in Recon vs
+  15% in Human2, yet in ABSOLUTE counts Recon has MORE mito DE-flux genes
+  (143 vs 81) — Human2's extra DE-flux genes went to cytosol.
+- Fix: report ENRICHMENT = DE-flux organelle% ÷ whole-model organelle% (fold over
+  each model's own background). Normalized, both models AGREE UC DE-flux is
+  mito-enriched (Recon ×1.78, Human2 ×1.24) and cytosol-led; the raw bars oversell
+  the divergence. Regenerate the figure as background-normalized fold-change bars
+  for any cross-model claim.
+- Deeper caveat: the histograms summarize INDEPENDENT DE-flux reaction sets
+  (BIGG vs MAR — the models don't share reaction ids), and each gene is collapsed
+  to a single dominant compartment (mode over its reactions). Prefer a
+  reaction-level compartment comparison, and map to a shared id space (MetanetX)
+  before comparing which reactions/pathways — not just which compartment % — agree.
+- Reliable across models = DIRECTION (cytosol-led both diseases; UC mito-enriched;
+  CD not). NOT reliable = the exact percentages.
+
+### Pathway-name harmonization (blocks the enriched-pathway comparison)
+The comparative enriched-pathway barplots
+(`analysis_compartment_recon_vs_human2/enriched_pathways_barplot_{CD,UC}.png`)
+match pathways by EXACT subsystem name, but the two models use different
+subsystem vocabularies, so the cross-model overlap is deflated by synonyms, not
+just biology. At FDR<0.1 only 1 pathway (CD) / 0 (UC) matched in both — largely a
+naming artifact. Known synonym pairs:
+- Recon `Transport, extracellular` ≈ Human2 `Transport reactions`
+- Recon `Beta oxidation of even-chain fatty acids` ≈ Human2 `Fatty acid oxidation`
+- Recon `Valine, leucine, and isoleucine metabolism` → no exact Human2 twin
+Fix options: (a) a manual Recon↔Human2 subsystem synonym map to mark truly shared
+pathways in the barplot; (b) better, map reactions to a shared ontology (MetanetX /
+KEGG / Reactome) and re-derive enrichment on the shared pathway space so overlap is
+computed on identity, not strings. Until then, read the barplots for magnitude/
+direction WITHIN each model, and treat the low cross-model overlap COUNT as
+inflated-negative. The genuinely Human2-only lipid biology (bile acid, omega-3 /
+unsaturated FA, peroxisomal carnitine shuttle in UC) is real — Recon's vocabulary
+cannot express it — and survives this caveat.
+
+### Concordance analyses added (context for the above)
+`analysis_compartment_recon_vs_human2/` now holds cross-model comparisons:
+`deflux_gene_overlap` (Jaccard CD 0.13 / UC 0.18), `deflux_direction_concordance`
+(shared-gene sign agreement CD 67% ρ=0.39 > UC 58% ρ=0.20 — CD signature more
+model-robust), and `moma_target_rank_concordance` (Spearman ρ≈0, 0/20 consensus —
+MOMA target RANKS do NOT reproduce across GEMs; single-model target lists are
+hypothesis-only). Plus `model_size_boxplot_by_subtype` (Human2 ~2.8× reactions,
+1.7× genes, 3.1× metabolites). Folder is NOT gitignored.
+
+---
+
+## [P2] metabolic_related_rna_seq.R flux violins — selection + interpretation caveats
+The per-run flux-violin scripts (CLAUDE §3h) accumulated several deliberate design choices
+worth revisiting:
+- **"Owner-by-region" gene selection is a heuristic.** Each pathway is sourced from the
+  cohort(s) with ≥1 DE-flux oncoprint target in that subsystem (glycolysis→CD, omega-3→UC,
+  sphingolipid→both), then the same set is shown in both. A pathway with no DE-flux target in
+  either cohort falls back to "both". This encodes the CD/UC region split but is not derived
+  from a formal region classifier — if the oncoprint targets shift (e.g. after the [P0] score
+  fix) the ownership can flip. Consider deriving ownership from `uc_cd_metabolic_comparision`
+  region output instead of recomputing inline.
+- **Sphingolipid is NOT significantly enriched in UC** (Up FDR 0.231; CD 0.098) — it is shown
+  on the UC side only because SLC33A1 is a shared DE-flux target. Decide whether to keep it on
+  the UC panel or mark it "target-driven, not pathway-significant".
+- **Between-violin bracket ≠ the `*`.** `*` = subtype-specific oncoprint target; the bracket =
+  per-gene Wilcoxon on the plotted (subsystem-averaged) flux. They diverge because `de_flux`/
+  target status is reaction-level across ALL subsystems while the plot averages ONE subsystem's
+  reactions (PKM, HADHA, ACOX3 are starred with no bracket). This is intended but easy to
+  misread — the subtitle must keep both definitions explicit.
+- **Not-plottable target genes** are dropped + logged (e.g. omega-3 ELOVL3/HACD1-4/TECRL,
+  glycolysis PGAM2/PGAM4) — their reactions sit in a different subsystem than the ranking's
+  `subsystem` label, so there is no in-subsystem flux to plot.
+- **FASN / de-novo FA synthesis is absent** from the omega-3 panel (it is filed under
+  `Fatty acid biosynthesis`). If de-novo synthesis matters, add a `Fatty acid biosynthesis`
+  violin (would include FASN — DE-flux in UC — SCD, ACACA, etc.).
+
 ---
 
 ## Open scientific questions
 
 - **Are there ANY robust CD targets?** Prototype says no gene recovers >72% of
   patients; re-evaluate after the [P0] score fix. Validate DHFR/FASN/folate against
-  IBD literature if they survive.
+  IBD literature if they survive. *(2026-07-29: still open. The scoring HAS changed
+  — CD now yields 21 significant genes, glycolysis/pyrimidine/transport — but until
+  the competitive null runs these are not the answer to this question.)*
 - **UC null:** real diffuse biology vs underpowered cohort (n=20, Kendall W≈0.17)?
+  *(2026-07-29: note the old "UC = 0 targets" statement is stale — the Human2 UC run
+  yields 40 significant genes under the current scoring. The Recon-era UC null and
+  the Human2 UC result must not be quoted interchangeably.)*
 - **CD vs UC contrast** must be re-examined after [P0] — the previous "CD strong,
-  UC null" story was partly a magnitude artifact.
+  UC null" story was partly a magnitude artifact. *(2026-07-29: partly re-examined —
+  under Human2 + the current score both cohorts yield targets with near-zero overlap
+  (shared = SLC33A1 only), so the original "CD strong / UC null" framing no longer
+  holds. Final re-examination still waits on the competitive null.)*
 
 ---
 

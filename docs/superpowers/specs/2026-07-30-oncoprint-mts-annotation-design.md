@@ -153,12 +153,34 @@ only among the significant genes or across the whole model.
 - x = rank by `rra_score` (1 = best pipeline target), log scale given ~2,200 genes.
 - y = mTS excess, zero line drawn.
 - All filtered genes as small grey points; `significant == True` genes overplotted in the
-  same blue/vermillion sign encoding as the bar and labelled.
+  same blue/vermillion sign encoding as the bar.
+- **Robust y-window.** Clip to `1.30 x max(|significant excess| U |1st-99th background
+  pctile|)`; a handful of extreme background genes (CD reaches `−0.4`) otherwise squash
+  every significant gene into the top 15% of the panel. The count of points outside the
+  window is printed — a silently cropped axis would misrepresent the background spread
+  this figure exists to characterise.
 - **Labelling has no optional dependency.** `adjustText` is NOT installed in this
   environment (verified 2026-07-30; available: matplotlib 3.3.4, scipy 1.5.3, pandas,
-  numpy). Use a deterministic greedy declutter: sort labels by y, and when a label would
-  land within a fixed minimum vertical gap of the previous one, push it down by that gap.
-  Stable and seed-free, consistent with the repo's determinism convention.
+  numpy).
+
+  REVISED during implementation. The first attempt — a greedy vertical declutter over all
+  significant genes — failed twice: it cascaded 21 labels into a 0.34-tall stack of
+  crossing leader lines, and because it placed text in DATA coordinates the labels
+  escaped the axes entirely (over the title, under the x-label). Root cause: **GPR-collinear
+  genes have an IDENTICAL excess by construction** (PKM/PKLR, ENO1/2/3, NME1/2,
+  GAPDH/GAPDHS), so per-gene labels can never avoid overlapping however they are nudged.
+
+  Final scheme: merge co-located genes (equal excess to 6 dp) into ONE label — collapsing
+  a shared prefix, e.g. `ENO2/3/1`, but falling back to a plain join when one symbol IS
+  the prefix, since `GAPDH` + `GAPDHS` would otherwise emit `GAPDHS/`. Label only the 5
+  highest and 5 lowest groups; place text beside its point with an offset in POINTS (not
+  data units) so it cannot leave the axes, alternating the offset magnitude 9/20 pt
+  because the top groups sit at nearly the same y (UC's five oxidase genes are all
+  ~`+0.085`). Merging also makes the collinearity visible instead of hiding it behind
+  stacked names. Per-gene detail lives on the oncoprint bar and in the CSV.
+- The stats note is a **figure caption below the axes**, not an in-panel text box: every
+  corner collided with labelled points in one cohort or the other (top-left buried UC's
+  NOS2, bottom-left buried CD's ENO group).
 - `rho_rank` printed in the panel (see below), plus the background median.
 
 **Two distinct Spearman statistics — do not conflate them.** Both were computed this
@@ -166,8 +188,19 @@ session and they differ:
 
 | name | pair | CD | UC |
 |---|---|---|---|
-| `rho_rank` | rank by `rra_score` vs rank by `−excess`, all filtered genes | `+0.329` | `+0.302` |
+| `rho_rank` | rank by `rra_score` vs rank by `−excess`, all filtered genes | `+0.352` | `+0.331` |
 | `rho_score` | `median_score` vs `excess`, all filtered genes | `+0.380` | `+0.251` |
+
+CORRECTED 2026-07-30 during implementation: this table first recorded `rho_rank` as
+`+0.329`/`+0.302`. Those values were computed on the **unfiltered** join (2,285/2,258
+genes, including the ones present in <50% of patients) while `rho_score` was computed on
+the filtered frame — two populations in one table. On the filtered population both
+statistics are as shown. Dropping the low-patient genes *raises* `rho_rank`, consistent
+with them being noise.
+
+Note the two statistics order the cohorts **oppositely** (`rho_rank` CD>UC, `rho_score`
+CD>UC in magnitude but with UC far lower) — quoting the wrong one changes which cohort
+looks more concordant.
 
 The scatter's x-axis is the `rra_score` rank, so the **panel prints `rho_rank`**. Both go
 in the stdout summary, each labelled.
@@ -191,9 +224,9 @@ No unit tests for a prototype. The port is correct iff the emitted CSV reproduce
 numbers computed ad hoc this session:
 
 - **CD:** background `+0.2563`; 21 significant; **12** below background; **12** below
-  10th pctile; **3** above 98th pctile; `rho_rank` `+0.329`; `rho_score` `+0.380`.
+  10th pctile; **3** above 98th pctile; `rho_rank` `+0.352`; `rho_score` `+0.380`.
 - **UC:** background `−0.0327`; 40 significant; **2** below background; **1** below 10th
-  pctile; **30** above 98th pctile; `rho_rank` `+0.302`; `rho_score` `+0.251`.
+  pctile; **30** above 98th pctile; `rho_rank` `+0.331`; `rho_score` `+0.251`.
 - Spot values: CD `ENO1` excess `−0.03197` at pctile `1.052`; CD `SLC7A2` `+0.03154` at
   `98.72`; UC `ACOX1` `+0.09041` at `99.95`; UC `CPT2` `−0.009661` at `7.909`.
 

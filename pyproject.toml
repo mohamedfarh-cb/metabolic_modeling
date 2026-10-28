@@ -1,0 +1,19 @@
+# Packaging added for csbl_methods pinning (gem_benchmark). Code unchanged from dc32da4.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tf_metabolism"
+version = "0.0.0+csbl.dc32da4"
+description = "tf_metabolism (syungjung/metabolic_modeling) + FM's human-gem-moma-oncoprint commits, packaged for pinning"
+requires-python = ">=3.8"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["tf_metabolism", "tf_metabolism.*"]
+
+[tool.setuptools.package-data]
+tf_metabolism = ["data/*"]
